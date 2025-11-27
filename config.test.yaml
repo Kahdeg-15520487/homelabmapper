@@ -1,0 +1,32 @@
+scan:
+  subnets:
+    - 127.0.0.1/32  # Just scan localhost for testing
+  timeout_ms:
+    ping: 500
+    http: 2000
+  parallel_scans: 10
+  ssl:
+    accept_self_signed: true
+    log_certificate_details: true
+
+credentials:
+  proxmox:
+    token_env: "PROXMOX_TOKEN"
+    # Or hardcode (not recommended): token: "PVEAPIToken=..."
+  portainer:
+    token_env: "PORTAINER_TOKEN"
+  docker:
+    # Leave empty for unauthenticated access
+  unraid:
+    api_key_env: "UNRAID_API_KEY"
+
+diff:
+  enabled: true
+  history_dir: ".homelabmapper/scans"
+  keep_last: 10
+
+output:
+  json: "scan-results.json"
+  markdown: "report.md"
+  mermaid: "topology.mmd"
+  diff_report: "changes.md"
