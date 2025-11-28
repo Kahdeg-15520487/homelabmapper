@@ -9,6 +9,18 @@ scan:
     accept_self_signed: true
     log_certificate_details: true
 
+hints:
+  # Service hints help identify specific services at known IPs/ports
+  services:
+    - ip: "192.168.1.50"
+      port: 8006
+      name: "Test Proxmox"
+      type: "Proxmox"
+    - ip: "192.168.1.100"
+      port: 9000
+      name: "Test Portainer"
+      type: "PortainerService"
+
 credentials:
   proxmox:
     token_env: "PROXMOX_TOKEN"
@@ -19,6 +31,13 @@ credentials:
     # Leave empty for unauthenticated access
   unraid:
     api_key_env: "UNRAID_API_KEY"
+  ssh:
+    enabled: false  # Set to true to enable SSH IP discovery for Proxmox VMs/LXCs
+    username: "root"
+    # Test environment - use password authentication
+    password_env: "TEST_SSH_PASSWORD"
+    # Production should use SSH keys:
+    # private_key_path: "/path/to/test_key"
 
 diff:
   enabled: true
@@ -30,10 +49,3 @@ output:
   markdown: "report.md"
   mermaid: "topology.mmd"
   diff_report: "changes.md"
-
-#192.168.1.30:9000
-#ptr_wAU2sX8Q0HbcxlpRj3KRBMkmRTbnWHOZlpoi/hpFtL0=
-#192.168.1.32:9010
-#ptr_pfy5gtKk855iie4WpDS4bdroDRArs4063o2pl9DEc/4=
-#PROXMOX_TOKEN_ID=root@pam!mcp-server
-#PROXMOX_TOKEN_SECRET=87f7d0c7-dd93-4aad-a928-393af347ac5d

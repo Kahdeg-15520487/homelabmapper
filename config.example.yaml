@@ -9,6 +9,34 @@ scan:
     accept_self_signed: true
     log_certificate_details: true
 
+hints:
+  # Service hints help identify specific services at known IPs/ports
+  # Format: ip:port or just ip
+  # Optional: token_env to specify different tokens per service
+  services:
+    - ip: "192.168.1.30"
+      port: 9000
+      name: "Portainer"
+      type: "PortainerService"
+      token_env: "PORTAINER_TOKEN_30"  # Different token for this instance
+    - ip: "192.168.1.32"
+      port: 9010
+      name: "Portainer"
+      type: "PortainerService"
+      token_env: "PORTAINER_TOKEN_32"  # Different token for this instance
+    - ip: "192.168.1.50"
+      port: 8006
+      name: "Proxmox Cluster"
+      type: "Proxmox"
+    - ip: "192.168.1.200"
+      name: "PC"
+      type: "PC"
+    # Example: Add more services as needed
+    # - ip: "192.168.1.100"
+    #   port: 8080
+    #   name: "Jenkins"
+    #   type: "Service"
+
 credentials:
   proxmox:
     token_env: "PROXMOX_TOKEN"
@@ -19,6 +47,15 @@ credentials:
     # Leave empty for unauthenticated access
   unraid:
     api_key_env: "UNRAID_API_KEY"
+  ssh:
+    enabled: false  # Set to true to enable SSH IP discovery for Proxmox VMs/LXCs
+    username: "root"
+    # Choose one authentication method:
+    # Option 1: Password (less secure)
+    password_env: "PROXMOX_SSH_PASSWORD"
+    # Option 2: SSH Key (recommended)
+    # private_key_path: "/path/to/id_rsa"
+    # private_key_path: "C:\\Users\\YourUser\\.ssh\\id_rsa"  # Windows example
 
 diff:
   enabled: true
