@@ -181,8 +181,11 @@ public class MarkdownReporter
     {
         return type switch
         {
-            EntityType.Proxmox => "🖥️",
-            EntityType.Vm => "💻",
+            EntityType.Proxmox => "🖧",
+            EntityType.ProxmoxCluster => "🗄️",
+            EntityType.ProxmoxNode => "🖥️",
+            EntityType.PC => "💻",
+            EntityType.Vm => "🖳",
             EntityType.Lxc => "📦",
             EntityType.DockerHost => "🐳",
             EntityType.Container => "📦",

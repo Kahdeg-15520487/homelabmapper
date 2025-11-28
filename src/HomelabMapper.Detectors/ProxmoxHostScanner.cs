@@ -66,8 +66,10 @@ public class ProxmoxHostScanner : IHostScanner
                 host.Type = EntityType.ProxmoxCluster;
                 host.Name = clusterStatus.Name;
                 host.Id = $"proxmox-cluster-{clusterStatus.Name}";
+                host.Ip = ""; // Cluster is a logical entity, no IP
                 host.Metadata["proxmox_cluster"] = clusterStatus.Name;
                 host.Metadata["proxmox_cluster_nodes"] = clusterStatus.Nodes ?? 0;
+                host.Metadata["discovery_entry_point"] = host.Ip; // Remember which IP was used to discover this cluster
             }
             else
             {
@@ -81,108 +83,82 @@ public class ProxmoxHostScanner : IHostScanner
             var entityTypeStr = isCluster ? "cluster" : "standalone node";
             context.Logger.Info($"Detected Proxmox {version.Version} {entityTypeStr} at {host.Ip}");
 
-            // Get nodes
-            var nodes = await apiClient.GetNodesAsync();
+            // Get nodes with proper cluster information
+            List<ProxmoxClusterNode> clusterNodes = new();
+            List<ProxmoxNode> resourceNodes = new();
+            
+            if (isCluster)
+            {
+                clusterNodes = await apiClient.GetClusterNodesAsync();
+                resourceNodes = await apiClient.GetNodesAsync();
+                context.Logger.Info($"Found {clusterNodes.Count} cluster nodes and {resourceNodes.Count} resource nodes");
+            }
+            else
+            {
+                resourceNodes = await apiClient.GetNodesAsync();
+            }
+            
             var discoveredEntities = new List<Entity>();
 
-            foreach (var node in nodes)
+            if (isCluster)
             {
-                context.Logger.Debug($"Processing Proxmox node: {node.Node}");
-
-                Entity nodeEntity;
-                
-                if (isCluster)
+                // Process cluster nodes using cluster status API for proper IPs
+                foreach (var clusterNode in clusterNodes)
                 {
-                    // In a cluster, create node entities under the cluster
-                    nodeEntity = new Entity
+                    context.Logger.Debug($"Processing cluster node: {clusterNode.Name} ({clusterNode.Ip})");
+
+                    var nodeEntity = new Entity
                     {
-                        Id = $"proxmox-node-{node.Node}",
-                        Ip = host.Ip, // Nodes share the cluster IP
+                        Id = $"proxmox-node-{clusterNode.Name}",
+                        Ip = clusterNode.Ip,
                         Type = EntityType.ProxmoxNode,
-                        Name = node.Node,
+                        Name = clusterNode.Name,
                         ParentId = host.Id,
-                        Status = ReachabilityStatus.Reachable,
+                        Status = clusterNode.Online ? ReachabilityStatus.Reachable : ReachabilityStatus.Unreachable,
                         Metadata = new Dictionary<string, object>
                         {
-                            ["proxmox_node"] = node.Node,
-                            ["proxmox_status"] = node.Status,
-                            ["cpu"] = node.Cpu,
-                            ["memory"] = node.Memory
+                            ["proxmox_node"] = clusterNode.Name,
+                            ["proxmox_online"] = clusterNode.Online,
+                            ["proxmox_local"] = clusterNode.Local,
+                            ["proxmox_node_id"] = clusterNode.Id
                         }
                     };
+
+                    // Add resource information if available
+                    var resourceNode = resourceNodes.FirstOrDefault(r => r.Node == clusterNode.Name);
+                    if (resourceNode != null)
+                    {
+                        nodeEntity.Metadata["proxmox_status"] = resourceNode.Status;
+                        nodeEntity.Metadata["cpu"] = resourceNode.Cpu;
+                        nodeEntity.Metadata["memory"] = resourceNode.Memory;
+                    }
+
                     discoveredEntities.Add(nodeEntity);
+
+                    // Process VMs and LXCs for this specific node
+                    await ProcessNodeResources(apiClient, nodeEntity, clusterNode.Name, discoveredEntities, context);
                 }
-                else
+            }
+            else
+            {
+                // Standalone node processing
+                foreach (var node in resourceNodes)
                 {
-                    // Standalone node - use the host entity itself
-                    nodeEntity = host;
+                    context.Logger.Debug($"Processing standalone node: {node.Node}");
+                    
+                    var nodeEntity = host;
+                    nodeEntity.Type = EntityType.ProxmoxNode;
                     nodeEntity.Metadata["proxmox_node"] = node.Node;
                     nodeEntity.Metadata["proxmox_status"] = node.Status;
                     nodeEntity.Metadata["cpu"] = node.Cpu;
                     nodeEntity.Metadata["memory"] = node.Memory;
-                }
 
-                // Get VMs
-                var vms = await apiClient.GetVmsAsync(node.Node);
-                foreach (var vm in vms)
-                {
-                    // Try to get VM network configuration
-                    var config = await apiClient.GetVmConfigAsync(node.Node, vm.VmId);
-                    var vmIp = ExtractIpFromConfig(config);
-
-                    var vmEntity = new Entity
-                    {
-                        Id = $"proxmox-vm-{node.Node}-{vm.VmId}",
-                        Ip = vmIp ?? "",
-                        Type = EntityType.Vm,
-                        Name = vm.Name,
-                        ParentId = nodeEntity.Id,
-                        Status = DetermineReachability(vmIp, context.DiscoveredIPs),
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["proxmox_vmid"] = vm.VmId,
-                            ["proxmox_node"] = node.Node,
-                            ["proxmox_status"] = vm.Status,
-                            ["cpu"] = vm.Cpu,
-                            ["memory"] = vm.Memory
-                        }
-                    };
-
-                    if (!string.IsNullOrEmpty(vmIp))
-                    {
-                        vmEntity.Metadata["api_reported_ip"] = vmIp;
-                    }
-
-                    discoveredEntities.Add(vmEntity);
-                }
-
-                // Get LXCs
-                var lxcs = await apiClient.GetLxcsAsync(node.Node);
-                foreach (var lxc in lxcs)
-                {
-                    var lxcEntity = new Entity
-                    {
-                        Id = $"proxmox-lxc-{node.Node}-{lxc.VmId}",
-                        Ip = "",
-                        Type = EntityType.Lxc,
-                        Name = lxc.Name,
-                        ParentId = nodeEntity.Id,
-                        Status = ReachabilityStatus.Unverified,
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["proxmox_vmid"] = lxc.VmId,
-                            ["proxmox_node"] = node.Node,
-                            ["proxmox_status"] = lxc.Status,
-                            ["cpu"] = lxc.Cpu,
-                            ["memory"] = lxc.Memory
-                        }
-                    };
-
-                    discoveredEntities.Add(lxcEntity);
+                    // Process VMs and LXCs for standalone node
+                    await ProcessNodeResources(apiClient, nodeEntity, node.Node, discoveredEntities, context);
                 }
             }
 
-            var nodeCount = nodes.Count;
+            var nodeCount = isCluster ? clusterNodes.Count : resourceNodes.Count;
             var vmCount = discoveredEntities.Count(e => e.Type == EntityType.Vm);
             var lxcCount = discoveredEntities.Count(e => e.Type == EntityType.Lxc);
             context.Logger.Info($"Proxmox scan found {nodeCount} nodes, {vmCount} VMs, {lxcCount} LXCs");
@@ -202,6 +178,68 @@ public class ProxmoxHostScanner : IHostScanner
     public IEnumerable<Type> GetChildScannerTypes(ScanResult result)
     {
         return result.ChildScannerCandidates;
+    }
+
+    private async Task ProcessNodeResources(ProxmoxApiClient apiClient, Entity nodeEntity, string nodeName, List<Entity> discoveredEntities, ScannerContext context)
+    {
+        // Get VMs
+        var vms = await apiClient.GetVmsAsync(nodeName);
+        foreach (var vm in vms)
+        {
+            // Try to get VM network configuration
+            var config = await apiClient.GetVmConfigAsync(nodeName, vm.VmId);
+            var vmIp = ExtractIpFromConfig(config);
+
+            var vmEntity = new Entity
+            {
+                Id = $"proxmox-vm-{nodeName}-{vm.VmId}",
+                Ip = vmIp ?? "",
+                Type = EntityType.Vm,
+                Name = vm.Name,
+                ParentId = nodeEntity.Id,
+                Status = DetermineReachability(vmIp, context.DiscoveredIPs),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["proxmox_vmid"] = vm.VmId,
+                    ["proxmox_node"] = nodeName,
+                    ["proxmox_status"] = vm.Status,
+                    ["cpu"] = vm.Cpu,
+                    ["memory"] = vm.Memory
+                }
+            };
+
+            if (config?.Net0 != null)
+            {
+                vmEntity.Metadata["network_config"] = config.Net0;
+            }
+
+            discoveredEntities.Add(vmEntity);
+        }
+
+        // Get LXCs
+        var lxcs = await apiClient.GetLxcsAsync(nodeName);
+        foreach (var lxc in lxcs)
+        {
+            var lxcEntity = new Entity
+            {
+                Id = $"proxmox-lxc-{nodeName}-{lxc.VmId}",
+                Ip = "",
+                Type = EntityType.Lxc,
+                Name = lxc.Name,
+                ParentId = nodeEntity.Id,
+                Status = ReachabilityStatus.Unverified,
+                Metadata = new Dictionary<string, object>
+                {
+                    ["proxmox_vmid"] = lxc.VmId,
+                    ["proxmox_node"] = nodeName,
+                    ["proxmox_status"] = lxc.Status,
+                    ["cpu"] = lxc.Cpu,
+                    ["memory"] = lxc.Memory
+                }
+            };
+
+            discoveredEntities.Add(lxcEntity);
+        }
     }
 
     private string? ExtractIpFromConfig(ProxmoxVmConfig? config)

@@ -140,6 +140,35 @@ public class ProxmoxApiClient
         }
     }
 
+    public async Task<List<ProxmoxClusterNode>> GetClusterNodesAsync()
+    {
+        try
+        {
+            var request = CreateAuthenticatedRequest($"{_baseUrl}/cluster/status");
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return new List<ProxmoxClusterNode>();
+
+            var content = await response.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<ProxmoxApiResponse<List<ProxmoxClusterStatus>>>(content);
+            
+            // Filter for node entries in cluster status
+            var nodeEntries = result?.Data?.Where(s => s.Type == "node").ToList() ?? new List<ProxmoxClusterStatus>();
+            
+            return nodeEntries.Select(n => new ProxmoxClusterNode
+            {
+                Name = n.Name,
+                Ip = n.Ip ?? "",
+                Online = n.Online == 1,
+                Local = n.Local == 1,
+                Id = n.Id ?? ""
+            }).ToList();
+        }
+        catch
+        {
+            return new List<ProxmoxClusterNode>();
+        }
+    }
+
     private HttpRequestMessage CreateAuthenticatedRequest(string url)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -238,4 +267,22 @@ public class ProxmoxClusterStatus
 
     [JsonPropertyName("quorate")]
     public int? Quorate { get; set; }
+
+    [JsonPropertyName("ip")]
+    public string? Ip { get; set; }
+
+    [JsonPropertyName("online")]
+    public int? Online { get; set; }
+
+    [JsonPropertyName("local")]
+    public int? Local { get; set; }
+}
+
+public class ProxmoxClusterNode
+{
+    public string Name { get; set; } = string.Empty;
+    public string Ip { get; set; } = string.Empty;
+    public bool Online { get; set; }
+    public bool Local { get; set; }
+    public string Id { get; set; } = string.Empty;
 }

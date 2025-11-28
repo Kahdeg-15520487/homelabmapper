@@ -6,6 +6,7 @@ public enum EntityType
     Proxmox,
     ProxmoxCluster,
     ProxmoxNode,
+    PC,
     Vm,
     Lxc,
     DockerHost,
