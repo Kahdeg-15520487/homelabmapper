@@ -101,6 +101,9 @@ public class DockerContainer
 
     [JsonPropertyName("NetworkSettings")]
     public DockerNetworkSettings? NetworkSettings { get; set; }
+
+    [JsonPropertyName("Labels")]
+    public Dictionary<string, string> Labels { get; set; } = new();
 }
 
 public class DockerPort

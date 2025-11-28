@@ -20,6 +20,7 @@ public class ScannerContext
     public ICredentialStore Credentials { get; set; } = null!;
     public ILogger Logger { get; set; } = null!;
     public HashSet<string> DiscoveredIPs { get; set; } = new();
+    public List<Models.Entity> AllEntities { get; set; } = new();
     
     public HttpClient CreateClientWithCertTracking(Models.Entity entity)
     {

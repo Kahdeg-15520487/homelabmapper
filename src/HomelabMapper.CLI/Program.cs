@@ -64,15 +64,77 @@ foreach (var ip in discoveredIPs)
 // Phase 2: Port Fingerprinting
 logger.Info("Port scanning discovered hosts...");
 var portScanner = new PortScanner();
-var entities = new List<HomelabMapper.Core.Models.Entity>();
+var entities = new System.Collections.Concurrent.ConcurrentBag<HomelabMapper.Core.Models.Entity>();
 
-foreach (var ip in discoveredIPs)
+// Parallel scan with progress tracking
+var scanProgress = new System.Collections.Concurrent.ConcurrentDictionary<string, (string Status, int PortCount)>();
+var completedCount = 0;
+var totalHosts = discoveredIPs.Count;
+
+// Start progress display task
+var progressCts = new System.Threading.CancellationTokenSource();
+var progressTask = Task.Run(async () =>
 {
+    while (!progressCts.Token.IsCancellationRequested)
+    {
+        var scanning = scanProgress.Where(x => x.Value.Status == "Scanning").ToList();
+        var complete = Interlocked.CompareExchange(ref completedCount, 0, 0);
+        
+        Console.Write($"\r  Progress: {complete}/{totalHosts} | Scanning: ");
+        
+        if (scanning.Any())
+        {
+            var displayScans = scanning.Take(5).Select(x => x.Key).ToList();
+            Console.Write(string.Join(", ", displayScans));
+            if (scanning.Count > 5)
+            {
+                Console.Write($" +{scanning.Count - 5} more");
+            }
+        }
+        else if (complete < totalHosts)
+        {
+            Console.Write("waiting...");
+        }
+        else
+        {
+            Console.Write("done");
+        }
+        
+        // Clear rest of line
+        Console.Write(new string(' ', Math.Max(0, Console.BufferWidth - Console.CursorLeft - 1)));
+        
+        await Task.Delay(1000, progressCts.Token);
+    }
+}, progressCts.Token);
+
+// Start scanning tasks
+var scanTasks = discoveredIPs.Select(async ip =>
+{
+    scanProgress[ip] = ("Scanning", 0);
     var entity = await portScanner.ScanHostAsync(ip, config.Scan.TimeoutMs.Http);
     entities.Add(entity);
-}
+    scanProgress[ip] = ("Complete", entity.OpenPorts.Count);
+    Interlocked.Increment(ref completedCount);
+    return entity;
+}).ToList();
 
+await Task.WhenAll(scanTasks);
+
+// Stop progress display
+progressCts.Cancel();
+try { await progressTask; } catch { }
+
+Console.WriteLine();
 logger.Info($"Port scanning complete. Found {entities.Count} entities");
+
+// Convert to list for processing
+var entityList = entities.ToList();
+
+// Apply hints to entities
+if (config.Hints?.Services?.Any() == true)
+{
+    ApplyHints(entityList, config.Hints.Services, logger);
+}
 
 // Phase 3: Execute scan with orchestrator
 var context = new ScannerContext
@@ -80,11 +142,12 @@ var context = new ScannerContext
     Client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(config.Scan.TimeoutMs.Http) },
     Credentials = credentialStore,
     Logger = logger,
-    DiscoveredIPs = discoveredIPs.ToHashSet()
+    DiscoveredIPs = discoveredIPs.ToHashSet(),
+    AllEntities = entityList // Pass entities so scanners can access them
 };
 
 logger.Info("Starting platform detection and API scanning...");
-var report = await orchestrator.ExecuteScanAsync(context, entities);
+var report = await orchestrator.ExecuteScanAsync(context, entityList);
 report.Subnets = subnets;
 
 // Phase 4: Post-scan correlation
@@ -178,6 +241,61 @@ if (config.Diff.Enabled)
 
 Console.WriteLine("\n✅ Scan complete!");
 
+static void ApplyHints(List<HomelabMapper.Core.Models.Entity> entities, List<ServiceHint> hints, ConsoleLogger logger)
+{
+    var appliedCount = 0;
+    
+    foreach (var hint in hints)
+    {
+        var matchingEntities = entities.Where(e => e.Ip == hint.Ip);
+        
+        foreach (var entity in matchingEntities)
+        {
+            // Check if port matches if specified in hint
+            if (hint.Port.HasValue)
+            {
+                if (!entity.OpenPorts.Contains(hint.Port.Value))
+                {
+                    continue; // Skip this entity if port doesn't match
+                }
+            }
+            
+            // Apply hint name if provided
+            if (!string.IsNullOrEmpty(hint.Name))
+            {
+                entity.Name = hint.Name;
+                entity.Metadata["hint_applied"] = true;
+                entity.Metadata["hint_name"] = hint.Name;
+            }
+            
+            // Apply hint type if provided and entity is still Unknown
+            if (!string.IsNullOrEmpty(hint.Type) && 
+                Enum.TryParse<HomelabMapper.Core.Models.EntityType>(hint.Type, out var hintType))
+            {
+                if (entity.Type == HomelabMapper.Core.Models.EntityType.Unknown)
+                {
+                    entity.Type = hintType;
+                    entity.Metadata["hint_type"] = hint.Type;
+                }
+            }
+            
+            // Store hint token_env if specified
+            if (!string.IsNullOrEmpty(hint.TokenEnv))
+            {
+                entity.Metadata["hint_token_env"] = hint.TokenEnv;
+            }
+            
+            appliedCount++;
+            logger.Info($"Applied hint to {entity.Ip}: {hint.Name ?? hint.Type ?? "unnamed"}");
+        }
+    }
+    
+    if (appliedCount > 0)
+    {
+        logger.Info($"Applied {appliedCount} service hint(s) to entities");
+    }
+}
+
 static void LoadCredentials(InMemoryCredentialStore store, CredentialsSettings creds)
 {
     if (creds.Proxmox != null && !string.IsNullOrEmpty(creds.Proxmox.Token))
@@ -197,3 +315,5 @@ static void LoadCredentials(InMemoryCredentialStore store, CredentialsSettings c
         store.SetCredential("unraid", "api_key", creds.Unraid.ApiKey);
     }
 }
+
+

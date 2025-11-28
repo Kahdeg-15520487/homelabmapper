@@ -6,6 +6,7 @@ namespace HomelabMapper.CLI.Configuration;
 public class ScanConfiguration
 {
     public ScanSettings Scan { get; set; } = new();
+    public HintsSettings? Hints { get; set; }
     public CredentialsSettings Credentials { get; set; } = new();
     public DiffSettings Diff { get; set; } = new();
     public OutputSettings Output { get; set; } = new();
@@ -29,6 +30,20 @@ public class SslSettings
 {
     public bool AcceptSelfSigned { get; set; } = true;
     public bool LogCertificateDetails { get; set; } = true;
+}
+
+public class HintsSettings
+{
+    public List<ServiceHint> Services { get; set; } = new();
+}
+
+public class ServiceHint
+{
+    public string Ip { get; set; } = string.Empty;
+    public int? Port { get; set; }
+    public string? Name { get; set; }
+    public string? Type { get; set; }
+    public string? TokenEnv { get; set; }
 }
 
 public class CredentialsSettings

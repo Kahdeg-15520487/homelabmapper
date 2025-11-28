@@ -12,7 +12,9 @@ public class PortainerApiClient
     public PortainerApiClient(HttpClient httpClient, string host, int port = 9000, string? token = null)
     {
         _httpClient = httpClient;
-        _baseUrl = $"https://{host}:{port}/api";
+        // Port 9010 is typically HTTP, others are typically HTTPS
+        var scheme = port == 9010 ? "http" : "https";
+        _baseUrl = $"{scheme}://{host}:{port}/api";
         _token = token;
     }
 
@@ -73,7 +75,11 @@ public class PortainerApiClient
         {
             var request = CreateAuthenticatedRequest($"{_baseUrl}/endpoints/{endpointId}/docker/containers/json?all=true");
             var response = await _httpClient.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return new List<DockerContainer>();
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Failed to get containers: {response.StatusCode}");
+                return new List<DockerContainer>();
+            }
 
             var content = await response.Content.ReadAsStringAsync();
             return JsonSerializer.Deserialize<List<DockerContainer>>(content) ?? new List<DockerContainer>();

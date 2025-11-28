@@ -38,6 +38,15 @@ public class ScanOrchestrator
 
             _logger.Debug($"Processing entity: {entity.Ip} ({entity.Type})");
 
+            // Skip scanning entities with IPs outside the discovered subnets
+            // (e.g., internal Docker container IPs like 172.17.0.x)
+            if (!string.IsNullOrEmpty(entity.Ip) && !context.DiscoveredIPs.Contains(entity.Ip))
+            {
+                _logger.Debug($"Skipping scan for {entity.Ip} - not in target subnets");
+                scanned.Add(entity.Id);
+                continue;
+            }
+
             var scanners = await _registry.FindApplicableScannersAsync(entity, context);
             
             // Sort by dependencies
@@ -113,8 +122,18 @@ public class ScanOrchestrator
 
             if (!canResolve.Any())
             {
-                // Circular dependency or missing dependency, add remaining as-is
-                _logger.Warn("Unable to fully resolve scanner dependencies");
+                // Check if remaining scanners only have optional dependencies missing
+                var onlyOptionalMissing = remaining.All(scanner =>
+                    scanner.DependsOn.All(dep => resolved.Any(r => r.ScannerName == dep))
+                );
+
+                if (!onlyOptionalMissing)
+                {
+                    // Circular dependency or missing required dependency
+                    _logger.Warn("Unable to fully resolve scanner dependencies");
+                }
+                
+                // Add remaining scanners - they either have circular deps or only optional deps missing
                 resolved.AddRange(remaining);
                 break;
             }
@@ -126,16 +145,40 @@ public class ScanOrchestrator
         return resolved;
     }
 
+    private bool IsNetworkEndpoint(EntityType type)
+    {
+        // Return true for entity types that represent actual network services/endpoints
+        // Return false for logical groupings that don't represent network endpoints
+        return type switch
+        {
+            EntityType.PortainerStack => false,  // Logical grouping, not a network endpoint
+            EntityType.ProxmoxCluster => false,  // Logical grouping
+            _ => true  // All others (services, containers, VMs, etc.) are network endpoints
+        };
+    }
+
     private void DetectConflicts()
     {
-        // Conflict 1: Multiple entities with same IP but different types
-        var ipGroups = _allEntities
+        // Conflict 1: Multiple entities with same IP:port combination and different types
+        // Group by IP:port for entities that represent network endpoints
+        var ipPortGroups = _allEntities
             .Where(e => !string.IsNullOrEmpty(e.Ip))
-            .GroupBy(e => e.Ip);
+            .Where(e => IsNetworkEndpoint(e.Type)) // Only check actual network services
+            .SelectMany(e => 
+            {
+                // If entity has ports, create IP:port combinations
+                if (e.OpenPorts.Any())
+                {
+                    return e.OpenPorts.Select(port => new { Entity = e, Key = $"{e.Ip}:{port}", Port = port });
+                }
+                // If no ports, use just IP (for services that don't expose ports)
+                return new[] { new { Entity = e, Key = e.Ip, Port = 0 } };
+            })
+            .GroupBy(x => x.Key);
 
-        foreach (var group in ipGroups.Where(g => g.Count() > 1))
+        foreach (var group in ipPortGroups.Where(g => g.Count() > 1))
         {
-            var entities = group.ToList();
+            var entities = group.Select(x => x.Entity).Distinct().ToList();
             var types = entities.Select(e => e.Type).Distinct().ToList();
 
             if (types.Count > 1)

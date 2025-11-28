@@ -48,7 +48,34 @@ public class MarkdownReporter
         sb.AppendLine();
 
         var rootEntities = report.Entities.Where(e => string.IsNullOrEmpty(e.ParentId)).ToList();
-        foreach (var root in rootEntities.OrderBy(e => e.Ip))
+        
+        // Sort by IP address (handling empty IPs and proper numeric sorting)
+        var sortedRoots = rootEntities.OrderBy(e => 
+        {
+            if (string.IsNullOrEmpty(e.Ip)) return (new byte[] { 255, 255, 255, 255 }, e.Name ?? "");
+            
+            var parts = e.Ip.Split('.');
+            if (parts.Length == 4 && 
+                byte.TryParse(parts[0], out var b1) &&
+                byte.TryParse(parts[1], out var b2) &&
+                byte.TryParse(parts[2], out var b3) &&
+                byte.TryParse(parts[3], out var b4))
+            {
+                return (new byte[] { b1, b2, b3, b4 }, e.Name ?? "");
+            }
+            
+            return (new byte[] { 255, 255, 255, 255 }, e.Ip);
+        }, Comparer<(byte[], string)>.Create((a, b) =>
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                var cmp = a.Item1[i].CompareTo(b.Item1[i]);
+                if (cmp != 0) return cmp;
+            }
+            return string.Compare(a.Item2, b.Item2, StringComparison.Ordinal);
+        }));
+        
+        foreach (var root in sortedRoots)
         {
             AppendEntityTree(sb, root, report.Entities, 0);
         }
@@ -123,16 +150,23 @@ public class MarkdownReporter
         var name = string.IsNullOrEmpty(entity.Name) ? entity.Type.ToString() : entity.Name;
         var ipPart = !string.IsNullOrEmpty(entity.Ip) ? $" ({entity.Ip})" : "";
         
-        sb.AppendLine($"{indent}{icon} **{name}**{ipPart} {statusIcon}");
+        // Add ports to display if available
+        var portsPart = "";
+        if (entity.OpenPorts.Any())
+        {
+            portsPart = $" - Ports: {string.Join(", ", entity.OpenPorts.OrderBy(p => p))}";
+        }
+        
+        sb.AppendLine($"{indent}{icon} **{name}**{ipPart}{portsPart} {statusIcon}");
 
         // Add metadata details
         if (entity.Metadata.ContainsKey("docker_image"))
         {
             sb.AppendLine($"{indent}  - Image: `{entity.Metadata["docker_image"]}`");
         }
-        if (entity.Metadata.ContainsKey("exposed_ports") && entity.Metadata["exposed_ports"] is List<string> ports)
+        if (entity.Metadata.ContainsKey("container_image"))
         {
-            sb.AppendLine($"{indent}  - Ports: {string.Join(", ", ports)}");
+            sb.AppendLine($"{indent}  - Image: `{entity.Metadata["container_image"]}`");
         }
 
         // Recursively append children

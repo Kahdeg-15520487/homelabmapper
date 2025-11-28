@@ -9,6 +9,7 @@ public class ProxmoxHostScanner : IHostScanner
     public string ScannerName => "Proxmox";
     public int Priority => 10;
     public List<string> DependsOn => new();
+    public List<string> OptionalDependsOn => new();
 
     public ScannerActivationCriteria GetActivationCriteria()
     {

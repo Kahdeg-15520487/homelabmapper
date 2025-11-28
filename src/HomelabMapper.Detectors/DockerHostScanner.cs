@@ -9,6 +9,7 @@ public class DockerHostScanner : IHostScanner
     public string ScannerName => "Docker";
     public int Priority => 20;
     public List<string> DependsOn => new();
+    public List<string> OptionalDependsOn => new();
 
     public ScannerActivationCriteria GetActivationCriteria()
     {

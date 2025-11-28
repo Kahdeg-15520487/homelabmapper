@@ -14,6 +14,7 @@ public class PortScanner
         2376,  // Docker TLS
         8006,  // Proxmox
         9000,  // Portainer
+        9010,  // Portainer alt
         9443,  // Portainer HTTPS
         5000,  // Various services
         8080,  // HTTP alt

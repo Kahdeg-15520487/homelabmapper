@@ -23,13 +23,8 @@ public class MermaidGenerator
         {
             var nodeId = SanitizeId(entity.Id);
             var label = GenerateLabel(entity);
-            var style = GetNodeStyle(entity.Type);
 
             sb.AppendLine($"    {nodeId}[\"{label}\"]");
-            if (!string.IsNullOrEmpty(style))
-            {
-                sb.AppendLine($"    {style}({nodeId})");
-            }
         }
 
         sb.AppendLine();
@@ -45,13 +40,27 @@ public class MermaidGenerator
 
         sb.AppendLine();
 
-        // Add styling
+        // Add styling definitions
         sb.AppendLine("    classDef proxmox fill:#2196F3,stroke:#1976D2,color:#fff");
         sb.AppendLine("    classDef vm fill:#4CAF50,stroke:#388E3C,color:#fff");
         sb.AppendLine("    classDef docker fill:#2496ED,stroke:#1E88E5,color:#fff");
         sb.AppendLine("    classDef container fill:#FF9800,stroke:#F57C00,color:#fff");
         sb.AppendLine("    classDef portainer fill:#13BEF9,stroke:#0288D1,color:#fff");
         sb.AppendLine("    classDef unreachable fill:#9E9E9E,stroke:#616161,color:#fff");
+        
+        sb.AppendLine();
+        
+        // Apply styles to nodes
+        foreach (var entity in report.Entities)
+        {
+            var nodeId = SanitizeId(entity.Id);
+            var styleClass = GetNodeStyleClass(entity);
+
+            if (!string.IsNullOrEmpty(styleClass))
+            {
+                sb.AppendLine($"    class {nodeId} {styleClass}");
+            }
+        }
 
         return sb.ToString();
     }
@@ -72,15 +81,21 @@ public class MermaidGenerator
         return $"{entity.Type}\\n{name}\\n{ip} {statusIcon}";
     }
 
-    private static string GetNodeStyle(EntityType type)
+    private static string GetNodeStyleClass(Entity entity)
     {
-        return type switch
+        // Apply unreachable style first if applicable
+        if (entity.Status == ReachabilityStatus.Unreachable)
         {
-            EntityType.Proxmox => "class",
-            EntityType.Vm or EntityType.Lxc => "class",
-            EntityType.DockerHost => "class",
-            EntityType.Container => "class",
-            EntityType.PortainerService or EntityType.PortainerStack => "class",
+            return "unreachable";
+        }
+
+        return entity.Type switch
+        {
+            EntityType.Proxmox or EntityType.ProxmoxCluster or EntityType.ProxmoxNode => "proxmox",
+            EntityType.Vm or EntityType.Lxc => "vm",
+            EntityType.DockerHost => "docker",
+            EntityType.Container => "container",
+            EntityType.PortainerService or EntityType.PortainerStack => "portainer",
             _ => ""
         };
     }

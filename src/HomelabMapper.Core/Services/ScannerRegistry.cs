@@ -25,6 +25,15 @@ public class ScannerRegistry
 
         foreach (var scanner in _scanners.Values.OrderBy(s => s.Priority))
         {
+            // First check: Does entity type hint match this scanner?
+            // This allows hints to directly activate scanners regardless of port criteria
+            if (IsEntityTypeMatchForScanner(host.Type, scanner.ScannerName))
+            {
+                _logger.Info($"Scanner {scanner.ScannerName} activated by entity type hint: {host.Type}");
+                applicable.Add(scanner);
+                continue; // Skip port/header checks if type matches
+            }
+
             var criteria = scanner.GetActivationCriteria();
 
             // Check port criteria
@@ -60,6 +69,20 @@ public class ScannerRegistry
         }
 
         return applicable;
+    }
+
+    private bool IsEntityTypeMatchForScanner(EntityType entityType, string scannerName)
+    {
+        // Map entity types to their corresponding scanners
+        return (entityType, scannerName) switch
+        {
+            (EntityType.PortainerService, "Portainer") => true,
+            (EntityType.Proxmox, "Proxmox") => true,
+            (EntityType.ProxmoxCluster, "Proxmox") => true,
+            (EntityType.ProxmoxNode, "Proxmox") => true,
+            (EntityType.DockerHost, "Docker") => true,
+            _ => false
+        };
     }
 
     private async Task<bool> CheckUrlPatternsAsync(Entity host, List<string> urlPatterns, ScannerContext context)

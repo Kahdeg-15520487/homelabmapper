@@ -1,4 +1,5 @@
 using HomelabMapper.Core.Models;
+using HomelabMapper.Core.Interfaces;
 
 namespace HomelabMapper.Correlation;
 
@@ -90,6 +91,38 @@ public class CorrelationEngine
                 // Mark this container as the Portainer service
                 portainerContainer.Type = EntityType.PortainerService;
                 portainerContainer.Metadata["is_portainer_service"] = true;
+            }
+        }
+    }
+
+    public static void ReparentPhysicalHostsToCluster(List<Entity> allEntities, ICredentialStore credentialStore)
+    {
+        var clusters = allEntities.Where(e => e.Type == EntityType.ProxmoxCluster).ToList();
+
+        foreach (var cluster in clusters)
+        {
+            // Get the node IPs for this cluster from the credential store
+            var nodeIpsStr = credentialStore.GetCredential("cluster_node_ips", cluster.Id);
+            if (!string.IsNullOrEmpty(nodeIpsStr))
+            {
+                var nodeIps = nodeIpsStr.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                
+                // Find all physical hosts that match these node IPs
+                foreach (var nodeIp in nodeIps)
+                {
+                    var matchingHosts = allEntities.Where(e =>
+                        (e.Type == EntityType.Proxmox || e.Type == EntityType.Service) &&
+                        e.Ip == nodeIp.Trim() &&
+                        string.IsNullOrEmpty(e.ParentId)
+                    ).ToList();
+
+                    foreach (var host in matchingHosts)
+                    {
+                        host.ParentId = cluster.Id;
+                        host.Status = ReachabilityStatus.Unreachable;
+                        host.Metadata["reason"] = "Duplicate cluster node";
+                    }
+                }
             }
         }
     }
