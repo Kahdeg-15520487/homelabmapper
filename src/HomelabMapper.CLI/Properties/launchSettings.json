@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "HomelabMapper.CLI": {
+      "commandName": "Project",
+      "workingDirectory": "J:\\workspace2\\c#\\homelabmapper"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace HomelabMapper.CLI.Configuration;
 
@@ -71,7 +72,9 @@ public class ConfigurationLoader
         }
 
         var yaml = File.ReadAllText(filePath);
-        var deserializer = new DeserializerBuilder().Build();
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .Build();
         var config = deserializer.Deserialize<ScanConfiguration>(yaml);
 
         // Resolve environment variables
@@ -88,8 +91,10 @@ public class ConfigurationLoader
         ResolveServiceCredentials(config.Credentials.Unraid);
     }
 
-    private static void ResolveServiceCredentials(ServiceCredentials creds)
+    private static void ResolveServiceCredentials(ServiceCredentials? creds)
     {
+        if (creds == null) return;
+        
         if (!string.IsNullOrEmpty(creds.TokenEnv))
         {
             creds.Token = Environment.GetEnvironmentVariable(creds.TokenEnv);

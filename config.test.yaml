@@ -1,6 +1,6 @@
 scan:
   subnets:
-    - 127.0.0.1/32  # Just scan localhost for testing
+    - 192.168.1.0/24
   timeout_ms:
     ping: 500
     http: 2000
@@ -30,3 +30,10 @@ output:
   markdown: "report.md"
   mermaid: "topology.mmd"
   diff_report: "changes.md"
+
+#192.168.1.30:9000
+#ptr_pfy5gtKk855iie4WpDS4bdroDRArs4063o2pl9DEc/4=
+#192.168.1.32:9010
+#ptr_wAU2sX8Q0HbcxlpRj3KRBMkmRTbnWHOZlpoi/hpFtL0=
+#PROXMOX_TOKEN_ID=root@pam!mcp-server
+#PROXMOX_TOKEN_SECRET=87f7d0c7-dd93-4aad-a928-393af347ac5d

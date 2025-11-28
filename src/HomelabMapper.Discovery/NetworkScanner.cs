@@ -83,6 +83,12 @@ public class NetworkScanner
         var baseIp = parts[0];
         var prefixLength = int.Parse(parts[1]);
 
+        // Handle /32 (single host) case
+        if (prefixLength == 32)
+        {
+            return new List<string> { baseIp };
+        }
+
         var ipBytes = IPAddress.Parse(baseIp).GetAddressBytes();
         var ipInt = BitConverter.ToUInt32(ipBytes.Reverse().ToArray(), 0);
 

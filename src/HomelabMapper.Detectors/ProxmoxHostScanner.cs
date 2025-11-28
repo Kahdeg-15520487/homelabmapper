@@ -24,21 +24,61 @@ public class ProxmoxHostScanner : IHostScanner
         {
             var client = context.CreateClientWithCertTracking(host);
             var token = context.Credentials.GetCredential("proxmox", "token");
+            
+            context.Logger.Debug($"Proxmox token present: {!string.IsNullOrEmpty(token)}");
+            if (!string.IsNullOrEmpty(token))
+            {
+                var tokenPreview = token.Length > 20 ? $"{token.Substring(0, 20)}..." : token;
+                context.Logger.Debug($"Token format: {tokenPreview} (length: {token.Length})");
+            }
+            context.Logger.Debug($"Attempting to connect to Proxmox at https://{host.Ip}:8006");
+            
             var apiClient = new ProxmoxApiClient(client, host.Ip, token);
 
             // Verify this is actually Proxmox
             var version = await apiClient.GetVersionAsync();
             if (version == null)
             {
+                context.Logger.Debug($"Proxmox version endpoint returned null for {host.Ip}");
                 return ScanResult.Failed(host, "Proxmox API not responding", "Version endpoint returned null");
             }
 
-            host.Type = EntityType.Proxmox;
-            host.Name = $"proxmox-{host.Ip}";
+            // Check for cluster membership
+            var clusterStatus = await apiClient.GetClusterStatusAsync();
+            bool isCluster = clusterStatus != null && !string.IsNullOrEmpty(clusterStatus.Name);
+            
+            if (isCluster)
+            {
+                var clusterId = $"proxmox-cluster-{clusterStatus!.Name}";
+                
+                // Check if we've already scanned this cluster
+                if (context.Credentials.GetCredential("scanned_clusters", clusterId) != null)
+                {
+                    context.Logger.Info($"Proxmox host {host.Ip} is part of cluster '{clusterStatus.Name}' which was already scanned. Skipping.");
+                    return ScanResult.Successful(new List<Entity>());
+                }
+                
+                // Mark this cluster as scanned
+                context.Credentials.SetCredential("scanned_clusters", clusterId, "true");
+                context.Logger.Info($"Detected Proxmox cluster '{clusterStatus.Name}' with {clusterStatus.Nodes} nodes at {host.Ip}");
+                
+                host.Type = EntityType.ProxmoxCluster;
+                host.Name = clusterStatus.Name;
+                host.Id = $"proxmox-cluster-{clusterStatus.Name}";
+                host.Metadata["proxmox_cluster"] = clusterStatus.Name;
+                host.Metadata["proxmox_cluster_nodes"] = clusterStatus.Nodes ?? 0;
+            }
+            else
+            {
+                host.Type = EntityType.ProxmoxNode;
+                host.Name = $"proxmox-{host.Ip}";
+            }
+            
             host.Metadata["proxmox_version"] = version.Version;
             host.Metadata["proxmox_release"] = version.Release;
 
-            context.Logger.Info($"Detected Proxmox {version.Version} at {host.Ip}");
+            var entityTypeStr = isCluster ? "cluster" : "standalone node";
+            context.Logger.Info($"Detected Proxmox {version.Version} {entityTypeStr} at {host.Ip}");
 
             // Get nodes
             var nodes = await apiClient.GetNodesAsync();
@@ -47,6 +87,39 @@ public class ProxmoxHostScanner : IHostScanner
             foreach (var node in nodes)
             {
                 context.Logger.Debug($"Processing Proxmox node: {node.Node}");
+
+                Entity nodeEntity;
+                
+                if (isCluster)
+                {
+                    // In a cluster, create node entities under the cluster
+                    nodeEntity = new Entity
+                    {
+                        Id = $"proxmox-node-{node.Node}",
+                        Ip = host.Ip, // Nodes share the cluster IP
+                        Type = EntityType.ProxmoxNode,
+                        Name = node.Node,
+                        ParentId = host.Id,
+                        Status = ReachabilityStatus.Reachable,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["proxmox_node"] = node.Node,
+                            ["proxmox_status"] = node.Status,
+                            ["cpu"] = node.Cpu,
+                            ["memory"] = node.Memory
+                        }
+                    };
+                    discoveredEntities.Add(nodeEntity);
+                }
+                else
+                {
+                    // Standalone node - use the host entity itself
+                    nodeEntity = host;
+                    nodeEntity.Metadata["proxmox_node"] = node.Node;
+                    nodeEntity.Metadata["proxmox_status"] = node.Status;
+                    nodeEntity.Metadata["cpu"] = node.Cpu;
+                    nodeEntity.Metadata["memory"] = node.Memory;
+                }
 
                 // Get VMs
                 var vms = await apiClient.GetVmsAsync(node.Node);
@@ -58,11 +131,11 @@ public class ProxmoxHostScanner : IHostScanner
 
                     var vmEntity = new Entity
                     {
-                        Id = $"proxmox-vm-{vm.VmId}",
+                        Id = $"proxmox-vm-{node.Node}-{vm.VmId}",
                         Ip = vmIp ?? "",
                         Type = EntityType.Vm,
                         Name = vm.Name,
-                        ParentId = host.Id,
+                        ParentId = nodeEntity.Id,
                         Status = DetermineReachability(vmIp, context.DiscoveredIPs),
                         Metadata = new Dictionary<string, object>
                         {
@@ -88,11 +161,11 @@ public class ProxmoxHostScanner : IHostScanner
                 {
                     var lxcEntity = new Entity
                     {
-                        Id = $"proxmox-lxc-{lxc.VmId}",
+                        Id = $"proxmox-lxc-{node.Node}-{lxc.VmId}",
                         Ip = "",
                         Type = EntityType.Lxc,
                         Name = lxc.Name,
-                        ParentId = host.Id,
+                        ParentId = nodeEntity.Id,
                         Status = ReachabilityStatus.Unverified,
                         Metadata = new Dictionary<string, object>
                         {
@@ -108,7 +181,10 @@ public class ProxmoxHostScanner : IHostScanner
                 }
             }
 
-            context.Logger.Info($"Proxmox scan found {discoveredEntities.Count} VMs/LXCs");
+            var nodeCount = nodes.Count;
+            var vmCount = discoveredEntities.Count(e => e.Type == EntityType.Vm);
+            var lxcCount = discoveredEntities.Count(e => e.Type == EntityType.Lxc);
+            context.Logger.Info($"Proxmox scan found {nodeCount} nodes, {vmCount} VMs, {lxcCount} LXCs");
 
             return ScanResult.Successful(
                 discoveredEntities,

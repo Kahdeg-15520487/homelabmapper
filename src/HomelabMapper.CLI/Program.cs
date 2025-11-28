@@ -27,6 +27,16 @@ var credentialStore = new InMemoryCredentialStore();
 // Load credentials from configuration
 LoadCredentials(credentialStore, config.Credentials);
 
+// Debug: Check if credentials were loaded
+if (!string.IsNullOrEmpty(config.Credentials.Proxmox?.Token))
+{
+    Console.WriteLine($"[DEBUG] Proxmox token loaded from env: length={config.Credentials.Proxmox.Token.Length}, starts with: {config.Credentials.Proxmox.Token.Substring(0, Math.Min(20, config.Credentials.Proxmox.Token.Length))}...");
+}
+else
+{
+    Console.WriteLine("[DEBUG] Proxmox token NOT loaded!");
+}
+
 var registry = new ScannerRegistry(logger);
 
 // Register scanners
@@ -45,7 +55,11 @@ var subnets = config.Scan.Subnets.Any()
 
 logger.Info($"Scanning subnets: {string.Join(", ", subnets)}");
 var discoveredIPs = await networkScanner.DiscoverHostsAsync(subnets, config.Scan.TimeoutMs.Ping);
-logger.Info($"Discovered {discoveredIPs.Count} active hosts");
+logger.Info($"Discovered {discoveredIPs.Count} active hosts:");
+foreach (var ip in discoveredIPs)
+{
+    logger.Info($"  - {ip}");
+}
 
 // Phase 2: Port Fingerprinting
 logger.Info("Port scanning discovered hosts...");
@@ -166,19 +180,19 @@ Console.WriteLine("\n✅ Scan complete!");
 
 static void LoadCredentials(InMemoryCredentialStore store, CredentialsSettings creds)
 {
-    if (!string.IsNullOrEmpty(creds.Proxmox.Token))
+    if (creds.Proxmox != null && !string.IsNullOrEmpty(creds.Proxmox.Token))
     {
         store.SetCredential("proxmox", "token", creds.Proxmox.Token);
     }
-    if (!string.IsNullOrEmpty(creds.Portainer.Token))
+    if (creds.Portainer != null && !string.IsNullOrEmpty(creds.Portainer.Token))
     {
         store.SetCredential("portainer", "token", creds.Portainer.Token);
     }
-    if (!string.IsNullOrEmpty(creds.Docker.Token))
+    if (creds.Docker != null && !string.IsNullOrEmpty(creds.Docker.Token))
     {
         store.SetCredential("docker", "token", creds.Docker.Token);
     }
-    if (!string.IsNullOrEmpty(creds.Unraid.ApiKey))
+    if (creds.Unraid != null && !string.IsNullOrEmpty(creds.Unraid.ApiKey))
     {
         store.SetCredential("unraid", "api_key", creds.Unraid.ApiKey);
     }

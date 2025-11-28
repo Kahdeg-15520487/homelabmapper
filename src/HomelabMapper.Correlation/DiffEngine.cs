@@ -165,7 +165,10 @@ public class DiffEngine
         }
         if (entity.Metadata.ContainsKey("proxmox_vmid"))
         {
-            return $"proxmox:{entity.Metadata["proxmox_vmid"]}";
+            var node = entity.Metadata.ContainsKey("proxmox_node") ? entity.Metadata["proxmox_node"] : "unknown";
+            // Include parent ID to distinguish VMs from different Proxmox hosts in a cluster
+            var parent = !string.IsNullOrEmpty(entity.ParentId) ? entity.ParentId : "no-parent";
+            return $"proxmox:{parent}:{node}:{entity.Metadata["proxmox_vmid"]}";
         }
         if (entity.Metadata.ContainsKey("portainer_stack_id"))
         {

@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -14,21 +15,37 @@ public class ProxmoxApiClient
         _httpClient = httpClient;
         _baseUrl = $"https://{host}:8006/api2/json";
         _token = token;
+        
+        // Set authorization header if token is provided
+        if (!string.IsNullOrEmpty(token))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("PVEAPIToken", token);
+        }
     }
 
     public async Task<ProxmoxVersion?> GetVersionAsync()
     {
         try
         {
-            var response = await _httpClient.GetAsync($"{_baseUrl}/version");
-            if (!response.IsSuccessStatusCode) return null;
+            // Try with authentication first
+            var request = CreateAuthenticatedRequest($"{_baseUrl}/version");
+            var response = await _httpClient.SendAsync(request);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[DEBUG] Proxmox version check failed: HTTP {response.StatusCode}");
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[DEBUG] Response body: {errorContent.Substring(0, Math.Min(200, errorContent.Length))}");
+                return null;
+            }
 
             var content = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<ProxmoxApiResponse<ProxmoxVersion>>(content);
             return result?.Data;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[DEBUG] Proxmox version check exception: {ex.GetType().Name} - {ex.Message}");
             return null;
         }
     }
@@ -105,13 +122,27 @@ public class ProxmoxApiClient
         }
     }
 
+    public async Task<ProxmoxClusterStatus?> GetClusterStatusAsync()
+    {
+        try
+        {
+            var request = CreateAuthenticatedRequest($"{_baseUrl}/cluster/status");
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var content = await response.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<ProxmoxApiResponse<List<ProxmoxClusterStatus>>>(content);
+            return result?.Data?.FirstOrDefault(s => s.Type == "cluster");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private HttpRequestMessage CreateAuthenticatedRequest(string url)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        if (!string.IsNullOrEmpty(_token))
-        {
-            request.Headers.Add("Authorization", $"PVEAPIToken={_token}");
-        }
         return request;
     }
 }
@@ -189,4 +220,22 @@ public class ProxmoxVmConfig
 
     [JsonPropertyName("net1")]
     public string? Net1 { get; set; }
+}
+
+public class ProxmoxClusterStatus
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("nodes")]
+    public int? Nodes { get; set; }
+
+    [JsonPropertyName("quorate")]
+    public int? Quorate { get; set; }
 }

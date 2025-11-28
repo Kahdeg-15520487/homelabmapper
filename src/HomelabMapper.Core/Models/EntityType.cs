@@ -4,6 +4,8 @@ public enum EntityType
 {
     Unknown,
     Proxmox,
+    ProxmoxCluster,
+    ProxmoxNode,
     Vm,
     Lxc,
     DockerHost,
