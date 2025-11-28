@@ -25,34 +25,48 @@ public class ScannerRegistry
 
         foreach (var scanner in _scanners.Values.OrderBy(s => s.Priority))
         {
+            var criteria = scanner.GetActivationCriteria();
+            
             // First check: Does entity type hint match this scanner?
             // This allows hints to directly activate scanners regardless of port criteria
-            if (IsEntityTypeMatchForScanner(host.Type, scanner.ScannerName))
+            var hintMatch = IsEntityTypeMatchForScanner(host.Type, scanner.ScannerName);
+            if (hintMatch)
             {
                 _logger.Info($"Scanner {scanner.ScannerName} activated by entity type hint: {host.Type}");
                 applicable.Add(scanner);
-                continue; // Skip port/header checks if type matches
+                continue; // This scanner already added via hint, skip criteria checks for it
             }
-
-            var criteria = scanner.GetActivationCriteria();
 
             // Check port criteria
             if (criteria.RequiredOpenPorts?.Any() == true)
             {
                 var hasAnyPort = criteria.RequiredOpenPorts.Any(port => host.OpenPorts.Contains(port));
-                if (!hasAnyPort) continue;
+                if (!hasAnyPort)
+                {
+                    _logger.Debug($"Scanner {scanner.ScannerName} skipped for {host.Ip}: required ports {string.Join(",", criteria.RequiredOpenPorts)} not found in {string.Join(",", host.OpenPorts)}");
+                    continue;
+                }
             }
 
             // Check HTTP header criteria
             if (criteria.RequiredHttpHeaders?.Any() == true)
             {
-                if (host.HttpHeaders == null) continue;
+                if (host.HttpHeaders == null)
+                {
+                    _logger.Debug($"Scanner {scanner.ScannerName} skipped for {host.Ip}: no HTTP headers available");
+                    continue;
+                }
                 
                 var hasAllHeaders = criteria.RequiredHttpHeaders.All(kvp =>
                     host.HttpHeaders.TryGetValue(kvp.Key, out var value) && 
                     value?.Contains(kvp.Value, StringComparison.OrdinalIgnoreCase) == true
                 );
-                if (!hasAllHeaders) continue;
+                if (!hasAllHeaders)
+                {
+                    var availableHeaders = string.Join(", ", host.HttpHeaders.Keys);
+                    _logger.Debug($"Scanner {scanner.ScannerName} skipped for {host.Ip}: required HTTP headers not found. Available: {availableHeaders}");
+                    continue;
+                }
             }
 
             // Check URL pattern criteria

@@ -87,7 +87,11 @@ public class PortScanner
     {
         try
         {
-            using var client = new HttpClient
+            using var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = false // Don't follow redirects - we want to see Location headers
+            };
+            using var client = new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromSeconds(3)
             };

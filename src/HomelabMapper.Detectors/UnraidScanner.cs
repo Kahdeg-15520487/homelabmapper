@@ -8,7 +8,7 @@ namespace HomelabMapper.Detectors;
 public class UnraidScanner : IHostScanner
 {
     public string ScannerName => "Unraid";
-    public int Priority => 35; // After Portainer (30)
+    public int Priority => 25; // Before Portainer (30) so containers exist first
     public List<string> DependsOn => new();
     public List<string> OptionalDependsOn => new();
 
@@ -19,7 +19,6 @@ public class UnraidScanner : IHostScanner
             RequiredOpenPorts = new List<int> { 80, 443 },
             RequiredHttpHeaders = new Dictionary<string, string>
             {
-                { "Location", "/Main" },
                 { "Content-Security-Policy", "connect.myunraid.net" }
             }
         };
@@ -48,32 +47,79 @@ public class UnraidScanner : IHostScanner
             host.Metadata["unraid_detected"] = "true";
             host.Metadata["unraid_container_count"] = containers.Count.ToString();
 
-            // Find existing Docker containers at this IP and enrich them with Unraid metadata
+            // Find existing containers discovered by Portainer
             var existingContainers = context.AllEntities
-                .Where(e => e.Type == EntityType.Container && e.Ip == host.Ip)
+                .Where(e => e.Type == EntityType.Container)
                 .ToList();
+            
+            context.Logger.Debug($"Found {existingContainers.Count} existing containers to match against");
+            var containersWithId = existingContainers.Count(c => c.Metadata.ContainsKey("container_id"));
+            context.Logger.Debug($"{containersWithId} of them have container_id metadata");
 
             foreach (var container in containers)
             {
-                // Try to match with existing Docker-discovered container
+                var containerName = GetContainerName(container.Names);
+                
+                // Unraid returns IDs in format: "dockerid:containerid"
+                // Extract just the container part after the colon
+                var unraidContainerId = container.Id.Contains(':') 
+                    ? container.Id.Split(':')[1] 
+                    : container.Id;
+                
+                context.Logger.Debug($"Unraid container {containerName}: ID={unraidContainerId.Substring(0, Math.Min(12, unraidContainerId.Length))}...");
+                
+                // Try to match with existing container by Docker ID (stored by Portainer)
+                // Match against both full ID and short ID (first 12 chars)
                 var existingContainer = existingContainers.FirstOrDefault(ec =>
-                    ec.Metadata.ContainsKey("docker_id") &&
-                    ec.Metadata["docker_id"] as string == container.Id
-                );
-
+                {
+                    if (!ec.Metadata.ContainsKey("container_id")) return false;
+                    
+                    var portainerContainerId = ec.Metadata["container_id"] as string ?? "";
+                    
+                    // Try exact match first
+                    if (portainerContainerId == unraidContainerId) return true;
+                    
+                    // Try matching with short ID (first 12 chars)
+                    if (portainerContainerId.Length >= 12 && unraidContainerId.StartsWith(portainerContainerId.Substring(0, 12)))
+                        return true;
+                    if (unraidContainerId.Length >= 12 && portainerContainerId.StartsWith(unraidContainerId.Substring(0, 12)))
+                        return true;
+                    
+                    return false;
+                });
+                
                 if (existingContainer != null)
                 {
-                    // Enrich existing container with Unraid metadata
+                    var portainerId = existingContainer.Metadata["container_id"] as string ?? "";
+                    context.Logger.Debug($"Found match! Portainer ID: {portainerId.Substring(0, Math.Min(12, portainerId.Length))}...");
+                    
+                    // Enrich existing container with Unraid metadata and update IP to host IP
+                    existingContainer.Ip = host.Ip;
                     existingContainer.Metadata["unraid_managed"] = true;
-                    existingContainer.Metadata["unraid_container_id"] = container.Id;
                     existingContainer.Metadata["unraid_image"] = container.Image ?? string.Empty;
                     existingContainer.Metadata["unraid_state"] = container.State ?? string.Empty;
+                    existingContainer.Status = MapContainerStatus(container.State);
                     
-                    context.Logger.Debug($"Enriched container {existingContainer.Name} with Unraid metadata");
+                    // Update open ports from Unraid data
+                    if (container.Ports?.Any() == true)
+                    {
+                        var publicPorts = container.Ports
+                            .Where(p => p.PublicPort.HasValue && p.PublicPort.Value > 0)
+                            .Select(p => p.PublicPort!.Value)
+                            .Distinct()
+                            .ToList();
+                        
+                        if (publicPorts.Any())
+                        {
+                            existingContainer.OpenPorts = publicPorts;
+                        }
+                    }
+                    
+                    context.Logger.Debug($"Matched and enriched container {containerName} with Unraid data (IP: {host.Ip})");
                 }
                 else
                 {
-                    context.Logger.Debug($"Found Unraid container not in Docker scan: {GetContainerName(container.Names)} ({container.Id})");
+                    context.Logger.Debug($"Found Unraid container without existing match: {containerName}");
                 }
             }
 
@@ -119,21 +165,17 @@ public class UnraidScanner : IHostScanner
                 query = @"
                 query ExampleQuery {
                     docker {
-                        id
                         containers {
                             id
                             names
                             image
-                            imageId
                             ports {
                                 ip
                                 privatePort
                                 publicPort
                                 type
                             }
-                            labels
                             state
-                            status
                         }
                     }
                 }"
@@ -225,9 +267,6 @@ public class UnraidData
 
 public class UnraidDocker
 {
-    [System.Text.Json.Serialization.JsonPropertyName("id")]
-    public string? Id { get; set; }
-    
     [System.Text.Json.Serialization.JsonPropertyName("containers")]
     public List<UnraidContainer> Containers { get; set; } = new();
 }
@@ -243,20 +282,11 @@ public class UnraidContainer
     [System.Text.Json.Serialization.JsonPropertyName("image")]
     public string? Image { get; set; }
     
-    [System.Text.Json.Serialization.JsonPropertyName("imageId")]
-    public string? ImageId { get; set; }
-    
     [System.Text.Json.Serialization.JsonPropertyName("ports")]
     public List<UnraidPort>? Ports { get; set; }
     
-    [System.Text.Json.Serialization.JsonPropertyName("labels")]
-    public Dictionary<string, object>? Labels { get; set; }
-    
     [System.Text.Json.Serialization.JsonPropertyName("state")]
     public string? State { get; set; }
-    
-    [System.Text.Json.Serialization.JsonPropertyName("status")]
-    public string? Status { get; set; }
 }
 
 public class UnraidPort
