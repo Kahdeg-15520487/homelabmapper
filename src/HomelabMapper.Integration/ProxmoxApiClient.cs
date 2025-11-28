@@ -9,10 +9,12 @@ public class ProxmoxApiClient
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
     private readonly string? _token;
+    private readonly string _host;
 
     public ProxmoxApiClient(HttpClient httpClient, string host, string? token = null)
     {
         _httpClient = httpClient;
+        _host = host;
         _baseUrl = $"https://{host}:8006/api2/json";
         _token = token;
         
@@ -167,6 +169,46 @@ public class ProxmoxApiClient
         {
             return new List<ProxmoxClusterNode>();
         }
+    }
+
+    public async Task<Dictionary<int, List<string>>> GetVmIpAddressesViaSshAsync(string nodeIp, List<int> vmIds, string sshUsername, string? sshPassword = null, string? sshKeyPath = null)
+    {
+        var results = new Dictionary<int, List<string>>();
+        
+        try
+        {
+            using var sshClient = new ProxmoxSshClient(nodeIp, sshUsername, sshPassword, sshKeyPath);
+            if (await sshClient.ConnectAsync())
+            {
+                results = await sshClient.GetVmIpAddressesAsync(vmIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DEBUG] SSH IP discovery failed for node {nodeIp}: {ex.Message}");
+        }
+
+        return results;
+    }
+
+    public async Task<Dictionary<int, List<string>>> GetLxcIpAddressesViaSshAsync(string nodeIp, List<int> lxcIds, string sshUsername, string? sshPassword = null, string? sshKeyPath = null)
+    {
+        var results = new Dictionary<int, List<string>>();
+        
+        try
+        {
+            using var sshClient = new ProxmoxSshClient(nodeIp, sshUsername, sshPassword, sshKeyPath);
+            if (await sshClient.ConnectAsync())
+            {
+                results = await sshClient.GetLxcIpAddressesAsync(lxcIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DEBUG] SSH IP discovery failed for node {nodeIp}: {ex.Message}");
+        }
+
+        return results;
     }
 
     private HttpRequestMessage CreateAuthenticatedRequest(string url)

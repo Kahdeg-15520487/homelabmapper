@@ -314,6 +314,18 @@ static void LoadCredentials(InMemoryCredentialStore store, CredentialsSettings c
     {
         store.SetCredential("unraid", "api_key", creds.Unraid.ApiKey);
     }
+    if (creds.Ssh != null && creds.Ssh.Enabled && !string.IsNullOrEmpty(creds.Ssh.Username))
+    {
+        store.SetCredential("ssh", "username", creds.Ssh.Username);
+        if (!string.IsNullOrEmpty(creds.Ssh.Password))
+        {
+            store.SetCredential("ssh", "password", creds.Ssh.Password);
+        }
+        if (!string.IsNullOrEmpty(creds.Ssh.PrivateKeyPath))
+        {
+            store.SetCredential("ssh", "private_key_path", creds.Ssh.PrivateKeyPath);
+        }
+    }
 }
 
 

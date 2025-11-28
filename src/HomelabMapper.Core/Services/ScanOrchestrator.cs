@@ -159,30 +159,27 @@ public class ScanOrchestrator
 
     private void DetectConflicts()
     {
-        // Conflict 1: Multiple entities with same IP:port combination and different types
-        // Group by IP:port for entities that represent network endpoints
-        var ipPortGroups = _allEntities
+        // Conflict 1: Multiple entities with same IP and different types
+        // Group by IP for entities that represent network endpoints
+        var ipGroups = _allEntities
             .Where(e => !string.IsNullOrEmpty(e.Ip))
             .Where(e => IsNetworkEndpoint(e.Type)) // Only check actual network services
-            .SelectMany(e => 
-            {
-                // If entity has ports, create IP:port combinations
-                if (e.OpenPorts.Any())
-                {
-                    return e.OpenPorts.Select(port => new { Entity = e, Key = $"{e.Ip}:{port}", Port = port });
-                }
-                // If no ports, use just IP (for services that don't expose ports)
-                return new[] { new { Entity = e, Key = e.Ip, Port = 0 } };
-            })
-            .GroupBy(x => x.Key);
+            .GroupBy(e => e.Ip);
 
-        foreach (var group in ipPortGroups.Where(g => g.Count() > 1))
+        foreach (var group in ipGroups.Where(g => g.Count() > 1))
         {
-            var entities = group.Select(x => x.Entity).Distinct().ToList();
+            var entities = group.ToList();
             var types = entities.Select(e => e.Type).Distinct().ToList();
 
             if (types.Count > 1)
             {
+                // Check if this is a resolvable conflict (Unknown + Identified entity)
+                if (TryResolveUnknownConflict(entities))
+                {
+                    // Conflict was resolved by merging
+                    continue;
+                }
+
                 _conflicts.Add(new Conflict
                 {
                     Type = ConflictType.TypeMismatch,
@@ -223,6 +220,44 @@ public class ScanOrchestrator
                 }
             }
         }
+    }
+
+    private bool TryResolveUnknownConflict(List<Entity> conflictingEntities)
+    {
+        // Check if we have exactly one Unknown entity and one or more identified entities
+        var unknownEntities = conflictingEntities.Where(e => e.Type == EntityType.Unknown).ToList();
+        var identifiedEntities = conflictingEntities.Where(e => e.Type != EntityType.Unknown).ToList();
+
+        if (unknownEntities.Count == 1 && identifiedEntities.Count >= 1)
+        {
+            var unknownEntity = unknownEntities[0];
+            var primaryEntity = identifiedEntities[0]; // Use the first identified entity as primary
+
+            _logger.Debug($"Resolving conflict: merging Unknown entity at {unknownEntity.Ip} with {primaryEntity.Type}: {primaryEntity.Name}");
+
+            // Merge ports from Unknown entity into the identified entity
+            var unknownPorts = unknownEntity.OpenPorts ?? new List<int>();
+            var existingPorts = primaryEntity.OpenPorts ?? new List<int>();
+            primaryEntity.OpenPorts = existingPorts.Union(unknownPorts).OrderBy(p => p).ToList();
+
+            // Merge metadata if useful
+            foreach (var kvp in unknownEntity.Metadata)
+            {
+                if (!primaryEntity.Metadata.ContainsKey(kvp.Key))
+                {
+                    primaryEntity.Metadata[kvp.Key] = kvp.Value;
+                }
+            }
+
+            // Remove the Unknown entity from the list
+            _allEntities.Remove(unknownEntity);
+
+            _logger.Info($"Merged Unknown entity into {primaryEntity.Type}: {primaryEntity.Name} at {primaryEntity.Ip} (added {unknownPorts.Count} ports)");
+            
+            return true; // Conflict resolved
+        }
+
+        return false; // Could not resolve conflict
     }
 
     private ScanSummary GenerateSummary()

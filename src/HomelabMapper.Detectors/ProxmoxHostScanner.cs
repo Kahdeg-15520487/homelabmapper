@@ -182,13 +182,48 @@ public class ProxmoxHostScanner : IHostScanner
 
     private async Task ProcessNodeResources(ProxmoxApiClient apiClient, Entity nodeEntity, string nodeName, List<Entity> discoveredEntities, ScannerContext context)
     {
-        // Get VMs
+        // Get VMs and LXCs
         var vms = await apiClient.GetVmsAsync(nodeName);
+        var lxcs = await apiClient.GetLxcsAsync(nodeName);
+
+        // Try SSH-based IP discovery if SSH is configured
+        Dictionary<int, List<string>> vmSshIps = new();
+        Dictionary<int, List<string>> lxcSshIps = new();
+        
+        if (TryGetSshConfig(context, out var sshConfig) && !string.IsNullOrEmpty(nodeEntity.Ip))
+        {
+            context.Logger.Debug($"Attempting SSH IP discovery for node {nodeName} at {nodeEntity.Ip}");
+            
+            var vmIds = vms.Select(v => v.VmId).ToList();
+            var lxcIds = lxcs.Select(l => l.VmId).ToList();
+            
+            vmSshIps = await apiClient.GetVmIpAddressesViaSshAsync(
+                nodeEntity.Ip, vmIds, sshConfig.Username!, sshConfig.Password, sshConfig.PrivateKeyPath);
+            
+            lxcSshIps = await apiClient.GetLxcIpAddressesViaSshAsync(
+                nodeEntity.Ip, lxcIds, sshConfig.Username!, sshConfig.Password, sshConfig.PrivateKeyPath);
+                
+            if (vmSshIps.Any() || lxcSshIps.Any())
+            {
+                context.Logger.Info($"SSH IP discovery found {vmSshIps.Count} VM IPs and {lxcSshIps.Count} LXC IPs on node {nodeName}");
+            }
+        }
+
+        // Process VMs
         foreach (var vm in vms)
         {
-            // Try to get VM network configuration
-            var config = await apiClient.GetVmConfigAsync(nodeName, vm.VmId);
-            var vmIp = ExtractIpFromConfig(config);
+            // Try SSH-discovered IP first, then fall back to config
+            string? vmIp = null;
+            if (vmSshIps.TryGetValue(vm.VmId, out var sshIps) && sshIps.Any())
+            {
+                vmIp = sshIps.First(); // Use first discovered IP
+            }
+            else
+            {
+                // Fallback to config parsing
+                var config = await apiClient.GetVmConfigAsync(nodeName, vm.VmId);
+                vmIp = ExtractIpFromConfig(config);
+            }
 
             var vmEntity = new Entity
             {
@@ -208,26 +243,41 @@ public class ProxmoxHostScanner : IHostScanner
                 }
             };
 
-            if (config?.Net0 != null)
+            // Add IP discovery method to metadata
+            if (vmSshIps.ContainsKey(vm.VmId))
             {
-                vmEntity.Metadata["network_config"] = config.Net0;
+                vmEntity.Metadata["ip_discovery"] = "ssh";
+                if (vmSshIps[vm.VmId].Count > 1)
+                {
+                    vmEntity.Metadata["all_ips"] = vmSshIps[vm.VmId];
+                }
+            }
+            else if (!string.IsNullOrEmpty(vmIp))
+            {
+                vmEntity.Metadata["ip_discovery"] = "config";
             }
 
             discoveredEntities.Add(vmEntity);
         }
 
-        // Get LXCs
-        var lxcs = await apiClient.GetLxcsAsync(nodeName);
+        // Process LXCs
         foreach (var lxc in lxcs)
         {
+            // Try SSH-discovered IP first
+            string? lxcIp = null;
+            if (lxcSshIps.TryGetValue(lxc.VmId, out var sshIps) && sshIps.Any())
+            {
+                lxcIp = sshIps.First(); // Use first discovered IP
+            }
+
             var lxcEntity = new Entity
             {
                 Id = $"proxmox-lxc-{nodeName}-{lxc.VmId}",
-                Ip = "",
+                Ip = lxcIp ?? "",
                 Type = EntityType.Lxc,
                 Name = lxc.Name,
                 ParentId = nodeEntity.Id,
-                Status = ReachabilityStatus.Unverified,
+                Status = DetermineReachability(lxcIp, context.DiscoveredIPs),
                 Metadata = new Dictionary<string, object>
                 {
                     ["proxmox_vmid"] = lxc.VmId,
@@ -238,8 +288,36 @@ public class ProxmoxHostScanner : IHostScanner
                 }
             };
 
+            // Add IP discovery method to metadata
+            if (lxcSshIps.ContainsKey(lxc.VmId))
+            {
+                lxcEntity.Metadata["ip_discovery"] = "ssh";
+                if (lxcSshIps[lxc.VmId].Count > 1)
+                {
+                    lxcEntity.Metadata["all_ips"] = lxcSshIps[lxc.VmId];
+                }
+            }
+
             discoveredEntities.Add(lxcEntity);
         }
+    }
+
+    private bool TryGetSshConfig(ScannerContext context, out (string Username, string? Password, string? PrivateKeyPath) sshConfig)
+    {
+        sshConfig = default;
+        
+        // Try to get SSH config from credentials store
+        var sshUsername = context.Credentials.GetCredential("ssh", "username");
+        var sshPassword = context.Credentials.GetCredential("ssh", "password");
+        var sshKeyPath = context.Credentials.GetCredential("ssh", "private_key_path");
+        
+        if (!string.IsNullOrEmpty(sshUsername))
+        {
+            sshConfig = (sshUsername, sshPassword, sshKeyPath);
+            return true;
+        }
+        
+        return false;
     }
 
     private string? ExtractIpFromConfig(ProxmoxVmConfig? config)

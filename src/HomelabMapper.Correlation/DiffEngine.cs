@@ -175,9 +175,16 @@ public class DiffEngine
             return $"portainer-stack:{entity.Metadata["portainer_stack_id"]}";
         }
 
-        // Priority 2: Name-based
+        // Priority 2: Name-based (include IP for services to avoid duplicates)
         if (!string.IsNullOrEmpty(entity.Name))
         {
+            // For services, include IP to distinguish multiple instances
+            if (entity.Type == EntityType.PortainerService || 
+                entity.Type == EntityType.Service || 
+                entity.Type == EntityType.ProxmoxCluster)
+            {
+                return $"{entity.Type}:{entity.Name}@{entity.Ip}";
+            }
             return $"{entity.Type}:{entity.Name}";
         }
 
