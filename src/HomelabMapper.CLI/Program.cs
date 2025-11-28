@@ -43,6 +43,7 @@ var registry = new ScannerRegistry(logger);
 registry.Register(new ProxmoxHostScanner());
 registry.Register(new DockerHostScanner());
 registry.Register(new PortainerScanner());
+registry.Register(new UnraidScanner());
 
 var orchestrator = new ScanOrchestrator(registry, logger);
 
@@ -152,6 +153,7 @@ report.Subnets = subnets;
 
 // Phase 4: Post-scan correlation
 logger.Info("Running correlation engine...");
+CorrelationEngine.ReparentContainersToUnraid(report.Entities);
 CorrelationEngine.ReparentContainersToStacks(report.Entities);
 CorrelationEngine.CorrelateVmIpsWithHosts(report.Entities, discoveredIPs.ToHashSet());
 CorrelationEngine.FindPortainerContainers(report.Entities);

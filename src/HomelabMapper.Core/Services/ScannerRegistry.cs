@@ -81,6 +81,7 @@ public class ScannerRegistry
             (EntityType.ProxmoxCluster, "Proxmox") => true,
             (EntityType.ProxmoxNode, "Proxmox") => true,
             (EntityType.DockerHost, "Docker") => true,
+            (EntityType.Unraid, "Unraid") => true,
             _ => false
         };
     }

@@ -126,4 +126,44 @@ public class CorrelationEngine
             }
         }
     }
+
+    public static void ReparentContainersToUnraid(List<Entity> allEntities)
+    {
+        var unraidHosts = allEntities.Where(e => e.Type == EntityType.Unraid).ToList();
+        
+        foreach (var unraidHost in unraidHosts)
+        {
+            // Find all Container entities at the same IP as the Unraid host
+            // This includes containers discovered by Portainer or other scanners
+            var containers = allEntities.Where(e => 
+                e.Type == EntityType.Container && 
+                e.Ip == unraidHost.Ip &&
+                e.Id != unraidHost.Id
+            ).ToList();
+
+            // Find all stacks at this IP and reparent them to Unraid
+            var stacks = allEntities.Where(e => 
+                e.Type == EntityType.PortainerStack && 
+                e.Ip == unraidHost.Ip
+            ).ToList();
+
+            foreach (var stack in stacks)
+            {
+                // Reparent stack to Unraid host
+                stack.ParentId = unraidHost.Id;
+            }
+
+            // Reparent containers that are not already children of stacks
+            foreach (var container in containers)
+            {
+                // Skip if already a child of a stack (stacks will be children of Unraid)
+                var isStackChild = stacks.Any(s => s.Id == container.ParentId);
+                
+                if (!isStackChild && container.ParentId != unraidHost.Id)
+                {
+                    container.ParentId = unraidHost.Id;
+                }
+            }
+        }
+    }
 }
