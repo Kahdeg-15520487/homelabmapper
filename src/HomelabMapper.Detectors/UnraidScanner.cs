@@ -8,7 +8,7 @@ namespace HomelabMapper.Detectors;
 public class UnraidScanner : IHostScanner
 {
     public string ScannerName => "Unraid";
-    public int Priority => 25; // Before Portainer (30) so containers exist first
+    public int Priority => 35; // After Portainer (30) so containers exist first
     public List<string> DependsOn => new();
     public List<string> OptionalDependsOn => new();
 
@@ -42,10 +42,41 @@ public class UnraidScanner : IHostScanner
 
             context.Logger.Info($"Detected Unraid server at {host.Ip} with {containers.Count} containers");
 
-            // Mark host as Unraid type
-            host.Type = EntityType.Unraid;
-            host.Metadata["unraid_detected"] = "true";
-            host.Metadata["unraid_container_count"] = containers.Count.ToString();
+            // If host is PortainerService or another identified type, create a NEW Unraid entity
+            // Otherwise just mark the existing host as Unraid
+            Entity unraidEntity;
+            if (host.Type != EntityType.Unknown && host.Type != EntityType.Unraid)
+            {
+                // Create new Unraid entity
+                unraidEntity = new Entity
+                {
+                    Id = $"unraid-{host.Ip}",
+                    Ip = host.Ip,
+                    Type = EntityType.Unraid,
+                    Name = host.Name ?? "Unraid Server",
+                    Status = ReachabilityStatus.Reachable,
+                    OpenPorts = host.OpenPorts,
+                    ParentId = string.Empty, // Empty string = root entity (prevents orchestrator from setting parent)
+                    Metadata = new Dictionary<string, object>
+                    {
+                        ["unraid_detected"] = "true",
+                        ["unraid_container_count"] = containers.Count.ToString()
+                    }
+                };
+                
+                // Make the original host (e.g., Portainer) a child of Unraid
+                host.ParentId = unraidEntity.Id;
+                
+                context.Logger.Debug($"Created new Unraid entity and reparented {host.Type} to it");
+            }
+            else
+            {
+                // Just mark the existing entity as Unraid
+                host.Type = EntityType.Unraid;
+                host.Metadata["unraid_detected"] = "true";
+                host.Metadata["unraid_container_count"] = containers.Count.ToString();
+                unraidEntity = host;
+            }
 
             // Find existing containers discovered by Portainer
             var existingContainers = context.AllEntities
@@ -93,8 +124,8 @@ public class UnraidScanner : IHostScanner
                     var portainerId = existingContainer.Metadata["container_id"] as string ?? "";
                     context.Logger.Debug($"Found match! Portainer ID: {portainerId.Substring(0, Math.Min(12, portainerId.Length))}...");
                     
-                    // Enrich existing container with Unraid metadata and update IP to host IP
-                    existingContainer.Ip = host.Ip;
+                    // Enrich existing container with Unraid metadata and update IP to Unraid IP
+                    existingContainer.Ip = unraidEntity.Ip;
                     existingContainer.Metadata["unraid_managed"] = true;
                     existingContainer.Metadata["unraid_image"] = container.Image ?? string.Empty;
                     existingContainer.Metadata["unraid_state"] = container.State ?? string.Empty;
@@ -115,7 +146,7 @@ public class UnraidScanner : IHostScanner
                         }
                     }
                     
-                    context.Logger.Debug($"Matched and enriched container {containerName} with Unraid data (IP: {host.Ip})");
+                    context.Logger.Debug($"Matched and enriched container {containerName} with Unraid data (IP: {unraidEntity.Ip})");
                 }
                 else
                 {
@@ -123,8 +154,13 @@ public class UnraidScanner : IHostScanner
                 }
             }
 
-            // Return empty list since we're just enriching existing entities
+            // Return new Unraid entity if we created one, otherwise return empty list
             // The ReparentContainersToUnraid correlation will handle the parent-child relationship
+            if (host.Type != EntityType.Unraid)
+            {
+                // We created a new Unraid entity, add it to the context
+                return ScanResult.Successful(new List<Entity> { unraidEntity });
+            }
             return ScanResult.Successful(new List<Entity>());
         }
         catch (Exception ex)

@@ -138,10 +138,16 @@ public class PortainerScanner : IHostScanner
             var containerName = container.Name?.ToLower() ?? string.Empty;
             var hasPortainerPort = container.OpenPorts.Any(p => p == 9000 || p == 9443 || p == 9010);
             
-            // Check if container name contains "portainer" or has Portainer ports exposed
-            if (containerName.Contains("portainer") || hasPortainerPort)
+            // Check if container name is exactly "portainer" or "portainer-ce" or "portainer-ee"
+            // AND has Portainer ports exposed (to avoid false positives like "portainer-agent")
+            var isPortainerService = (containerName == "portainer" || 
+                                     containerName == "portainer-ce" || 
+                                     containerName == "portainer-ee") && 
+                                     hasPortainerPort;
+            
+            if (isPortainerService)
             {
-                context.Logger.Debug($"Found Portainer container: {container.Name} at {container.Ip}");
+                context.Logger.Debug($"Found Portainer service container: {container.Name} at {container.Ip}");
                 return container;
             }
         }

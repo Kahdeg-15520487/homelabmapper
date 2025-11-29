@@ -178,10 +178,11 @@ public class DiffEngine
         // Priority 2: Name-based (include IP for services to avoid duplicates)
         if (!string.IsNullOrEmpty(entity.Name))
         {
-            // For services, include IP to distinguish multiple instances
+            // For services and infrastructure hosts, include IP to distinguish multiple instances
             if (entity.Type == EntityType.PortainerService || 
                 entity.Type == EntityType.Service || 
-                entity.Type == EntityType.ProxmoxCluster)
+                entity.Type == EntityType.ProxmoxCluster ||
+                entity.Type == EntityType.Unraid)
             {
                 return $"{entity.Type}:{entity.Name}@{entity.Ip}";
             }

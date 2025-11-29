@@ -7,7 +7,6 @@ public class ScanOrchestrator
 {
     private readonly ScannerRegistry _registry;
     private readonly ILogger _logger;
-    private readonly List<Entity> _allEntities = new();
     private readonly List<Conflict> _conflicts = new();
 
     public ScanOrchestrator(ScannerRegistry registry, ILogger logger)
@@ -22,7 +21,7 @@ public class ScanOrchestrator
         _logger.Info($"Starting scan: {scanId}");
 
         // Phase 1: Add all discovered hosts to the entity list
-        _allEntities.AddRange(discoveredHosts);
+        context.AllEntities.AddRange(discoveredHosts);
 
         // Phase 2: Recursive scanner activation with dependency management
         var queue = new Queue<Entity>(discoveredHosts);
@@ -73,7 +72,7 @@ public class ScanOrchestrator
                     foreach (var child in result.DiscoveredEntities)
                     {
                         child.ParentId ??= entity.Id;
-                        _allEntities.Add(child);
+                        context.AllEntities.Add(child);
                         queue.Enqueue(child);
                     }
 
@@ -92,19 +91,30 @@ public class ScanOrchestrator
 
         // Phase 3: Conflict detection
         _logger.Info("Detecting conflicts...");
-        DetectConflicts();
+        DetectConflicts(context);
 
         // Phase 4: Generate report
+        // Deduplicate entities by ID (in case same entity was added multiple times)
+        var uniqueEntities = context.AllEntities
+            .GroupBy(e => e.Id)
+            .Select(g => g.First())
+            .ToList();
+        
         var report = new TopologyReport
         {
             Timestamp = DateTime.UtcNow,
             ScanId = scanId,
-            Entities = _allEntities,
+            Entities = uniqueEntities,
             Conflicts = _conflicts,
-            Summary = GenerateSummary()
+            Summary = GenerateSummary(context)
         };
 
-        _logger.Info($"Scan completed: {_allEntities.Count} entities, {_conflicts.Count} conflicts");
+        if (uniqueEntities.Count < context.AllEntities.Count)
+        {
+            _logger.Warn($"Removed {context.AllEntities.Count - uniqueEntities.Count} duplicate entities");
+        }
+
+        _logger.Info($"Scan completed: {uniqueEntities.Count} entities, {_conflicts.Count} conflicts");
 
         return report;
     }
@@ -157,11 +167,11 @@ public class ScanOrchestrator
         };
     }
 
-    private void DetectConflicts()
+    private void DetectConflicts(ScannerContext context)
     {
         // Conflict 1: Multiple entities with same IP and different types
         // Group by IP for entities that represent network endpoints
-        var ipGroups = _allEntities
+        var ipGroups = context.AllEntities
             .Where(e => !string.IsNullOrEmpty(e.Ip))
             .Where(e => IsNetworkEndpoint(e.Type)) // Only check actual network services
             .GroupBy(e => e.Ip);
@@ -174,7 +184,7 @@ public class ScanOrchestrator
             if (types.Count > 1)
             {
                 // Check if this is a resolvable conflict (Unknown + Identified entity)
-                if (TryResolveUnknownConflict(entities))
+                if (TryResolveUnknownConflict(entities, context))
                 {
                     // Conflict was resolved by merging
                     continue;
@@ -191,7 +201,7 @@ public class ScanOrchestrator
         }
 
         // Conflict 2: Unverified entities
-        var unverified = _allEntities.Where(e => e.Status == ReachabilityStatus.Unverified).ToList();
+        var unverified = context.AllEntities.Where(e => e.Status == ReachabilityStatus.Unverified).ToList();
         foreach (var entity in unverified)
         {
             _conflicts.Add(new Conflict
@@ -204,7 +214,7 @@ public class ScanOrchestrator
         }
 
         // Conflict 3: IP mismatch between API and scan
-        foreach (var entity in _allEntities)
+        foreach (var entity in context.AllEntities)
         {
             if (entity.Metadata.TryGetValue("api_reported_ip", out var apiIpObj) && apiIpObj is string apiIp)
             {
@@ -222,7 +232,7 @@ public class ScanOrchestrator
         }
     }
 
-    private bool TryResolveUnknownConflict(List<Entity> conflictingEntities)
+    private bool TryResolveUnknownConflict(List<Entity> conflictingEntities, ScannerContext context)
     {
         // Check if we have exactly one Unknown entity and one or more identified entities
         var unknownEntities = conflictingEntities.Where(e => e.Type == EntityType.Unknown).ToList();
@@ -250,7 +260,7 @@ public class ScanOrchestrator
             }
 
             // Remove the Unknown entity from the list
-            _allEntities.Remove(unknownEntity);
+            context.AllEntities.Remove(unknownEntity);
 
             _logger.Info($"Merged Unknown entity into {primaryEntity.Type}: {primaryEntity.Name} at {primaryEntity.Ip} (added {unknownPorts.Count} ports)");
             
@@ -260,21 +270,21 @@ public class ScanOrchestrator
         return false; // Could not resolve conflict
     }
 
-    private ScanSummary GenerateSummary()
+    private ScanSummary GenerateSummary(ScannerContext context)
     {
         var summary = new ScanSummary
         {
-            TotalEntities = _allEntities.Count
+            TotalEntities = context.AllEntities.Count
         };
 
         // Count by type
-        foreach (var typeGroup in _allEntities.GroupBy(e => e.Type))
+        foreach (var typeGroup in context.AllEntities.GroupBy(e => e.Type))
         {
             summary.EntitiesByType[typeGroup.Key] = typeGroup.Count();
         }
 
         // Count by status
-        foreach (var statusGroup in _allEntities.GroupBy(e => e.Status))
+        foreach (var statusGroup in context.AllEntities.GroupBy(e => e.Status))
         {
             summary.EntitiesByStatus[statusGroup.Key] = statusGroup.Count();
         }

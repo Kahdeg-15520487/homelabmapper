@@ -191,7 +191,7 @@ public class MarkdownReporter
             EntityType.Container => "📦",
             EntityType.PortainerService => "🎛️",
             EntityType.PortainerStack => "📚",
-            EntityType.Unraid => "🗄️",
+            EntityType.Unraid => "🧱",
             EntityType.Nas => "💾",
             EntityType.Service => "⚙️",
             _ => "❓"
