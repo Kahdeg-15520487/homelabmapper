@@ -10,6 +10,7 @@ public class ScanConfiguration
     public CredentialsSettings Credentials { get; set; } = new();
     public DiffSettings Diff { get; set; } = new();
     public OutputSettings Output { get; set; } = new();
+    public LoggingSettings Logging { get; set; } = new();
 }
 
 public class ScanSettings
@@ -85,6 +86,11 @@ public class OutputSettings
     public string Markdown { get; set; } = "report.md";
     public string Mermaid { get; set; } = "topology.mmd";
     public string DiffReport { get; set; } = "changes.md";
+}
+
+public class LoggingSettings
+{
+    public string Level { get; set; } = "Info";
 }
 
 public class ConfigurationLoader

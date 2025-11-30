@@ -21,7 +21,10 @@ if (!File.Exists(configPath))
 }
 
 // Initialize services
-var logger = new ConsoleLogger();
+var logLevel = Enum.TryParse<LogLevel>(config.Logging.Level, true, out var level) 
+    ? level 
+    : LogLevel.Info;
+var logger = new ConsoleLogger(logLevel);
 var credentialStore = new InMemoryCredentialStore();
 
 // Load credentials from configuration
@@ -30,11 +33,11 @@ LoadCredentials(credentialStore, config.Credentials);
 // Debug: Check if credentials were loaded
 if (!string.IsNullOrEmpty(config.Credentials.Proxmox?.Token))
 {
-    Console.WriteLine($"[DEBUG] Proxmox token loaded from env: length={config.Credentials.Proxmox.Token.Length}, starts with: {config.Credentials.Proxmox.Token.Substring(0, Math.Min(20, config.Credentials.Proxmox.Token.Length))}...");
+    logger.Debug($"Proxmox token loaded from env: length={config.Credentials.Proxmox.Token.Length}, starts with: {config.Credentials.Proxmox.Token.Substring(0, Math.Min(20, config.Credentials.Proxmox.Token.Length))}...");
 }
 else
 {
-    Console.WriteLine("[DEBUG] Proxmox token NOT loaded!");
+    logger.Debug("Proxmox token NOT loaded!");
 }
 
 var registry = new ScannerRegistry(logger);
@@ -153,12 +156,8 @@ report.Subnets = subnets;
 
 // Phase 4: Post-scan correlation
 logger.Info("Running correlation engine...");
-// Disabled: Scanners already set up correct hierarchy (Unraid → PortainerService → Stacks → Containers)
-// CorrelationEngine.ReparentContainersToUnraid(report.Entities);
-CorrelationEngine.ReparentContainersToStacks(report.Entities);
-CorrelationEngine.CorrelateVmIpsWithHosts(report.Entities, discoveredIPs.ToHashSet());
-// Disabled: Let containers remain as containers, not change type to PortainerService
-// CorrelationEngine.FindPortainerContainers(report.Entities);
+CorrelationEngine.ReparentContainersToPortainerStacks(report.Entities);
+CorrelationEngine.CorrelateVmAndLxcWithProxmoxNodes(report.Entities, discoveredIPs.ToHashSet());
 
 // Phase 5: Display results
 Console.WriteLine("\n=== Scan Results ===");

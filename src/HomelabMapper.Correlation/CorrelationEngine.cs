@@ -5,7 +5,7 @@ namespace HomelabMapper.Correlation;
 
 public class CorrelationEngine
 {
-    public static void ReparentContainersToStacks(List<Entity> allEntities)
+    public static void ReparentContainersToPortainerStacks(List<Entity> allEntities)
     {
         var stacks = allEntities.Where(e => e.Type == EntityType.PortainerStack).ToList();
         var containers = allEntities.Where(e => e.Type == EntityType.Container).ToList();
@@ -36,7 +36,7 @@ public class CorrelationEngine
         }
     }
 
-    public static void CorrelateVmIpsWithHosts(List<Entity> allEntities, HashSet<string> discoveredIPs)
+    public static void CorrelateVmAndLxcWithProxmoxNodes(List<Entity> allEntities, HashSet<string> discoveredIPs)
     {
         var vms = allEntities.Where(e => e.Type == EntityType.Vm || e.Type == EntityType.Lxc).ToList();
 
