@@ -153,10 +153,12 @@ report.Subnets = subnets;
 
 // Phase 4: Post-scan correlation
 logger.Info("Running correlation engine...");
-CorrelationEngine.ReparentContainersToUnraid(report.Entities);
+// Disabled: Scanners already set up correct hierarchy (Unraid → PortainerService → Stacks → Containers)
+// CorrelationEngine.ReparentContainersToUnraid(report.Entities);
 CorrelationEngine.ReparentContainersToStacks(report.Entities);
 CorrelationEngine.CorrelateVmIpsWithHosts(report.Entities, discoveredIPs.ToHashSet());
-CorrelationEngine.FindPortainerContainers(report.Entities);
+// Disabled: Let containers remain as containers, not change type to PortainerService
+// CorrelationEngine.FindPortainerContainers(report.Entities);
 
 // Phase 5: Display results
 Console.WriteLine("\n=== Scan Results ===");

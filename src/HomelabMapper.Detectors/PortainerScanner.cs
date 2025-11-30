@@ -57,15 +57,6 @@ public class PortainerScanner : IHostScanner
             host.Metadata["portainer_version"] = status.Version;
             host.Metadata["portainer_instance_id"] = status.InstanceID;
 
-            // Find the Portainer container itself (it should be in the Docker host's containers)
-            // This will be marked as PortainerService type
-            var portainerContainer = FindPortainerContainer(host, context);
-            if (portainerContainer != null)
-            {
-                portainerContainer.Type = EntityType.PortainerService;
-                portainerContainer.Metadata["portainer_version"] = status.Version;
-            }
-
             // Get all endpoints (environments) first
             var endpoints = await apiClient.GetEndpointsAsync();
             context.Logger.Info($"Found {endpoints.Count} Portainer endpoint(s)");
@@ -88,7 +79,7 @@ public class PortainerScanner : IHostScanner
                         Ip = host.Ip,
                         Type = EntityType.PortainerStack,
                         Name = stack.Name,
-                        ParentId = portainerContainer?.Id ?? host.Id,
+                        ParentId = host.Id,
                         Status = ReachabilityStatus.Reachable,
                         Metadata = new Dictionary<string, object>
                         {
@@ -125,36 +116,6 @@ public class PortainerScanner : IHostScanner
         return Array.Empty<Type>();
     }
 
-    private Entity? FindPortainerContainer(Entity host, ScannerContext context)
-    {
-        // Look for Portainer container in Docker scan results at the same IP
-        // Portainer container typically has "portainer" in its name and runs on port 9000/9443
-        var containers = context.AllEntities
-            .Where(e => e.Type == EntityType.Container && e.Ip == host.Ip)
-            .ToList();
-
-        foreach (var container in containers)
-        {
-            var containerName = container.Name?.ToLower() ?? string.Empty;
-            var hasPortainerPort = container.OpenPorts.Any(p => p == 9000 || p == 9443 || p == 9010);
-            
-            // Check if container name is exactly "portainer" or "portainer-ce" or "portainer-ee"
-            // AND has Portainer ports exposed (to avoid false positives like "portainer-agent")
-            var isPortainerService = (containerName == "portainer" || 
-                                     containerName == "portainer-ce" || 
-                                     containerName == "portainer-ee") && 
-                                     hasPortainerPort;
-            
-            if (isPortainerService)
-            {
-                context.Logger.Debug($"Found Portainer service container: {container.Name} at {container.Ip}");
-                return container;
-            }
-        }
-
-        return null;
-    }
-
     private List<Entity> CreateContainerEntities(
         List<DockerContainer> portainerContainers,
         List<Entity> stackEntities,
@@ -180,6 +141,48 @@ public class PortainerScanner : IHostScanner
                 ? stackEntities.FirstOrDefault(s => s.Name.Equals(stackName, StringComparison.OrdinalIgnoreCase))
                 : null;
 
+            // Try to find existing container created by Unraid scanner (match by Docker ID)
+            var existingContainer = context.AllEntities.FirstOrDefault(e => 
+                e.Type == EntityType.Container && 
+                e.Metadata.ContainsKey("container_id") &&
+                (e.Metadata["container_id"] as string ?? "").StartsWith(container.Id.Substring(0, Math.Min(12, container.Id.Length)))
+            );
+
+            if (existingContainer != null)
+            {
+                // Enrich existing Unraid container with Portainer metadata
+                context.Logger.Debug($"Found existing container {containerName}, enriching with Portainer data");
+                
+                // Add Portainer-specific metadata
+                existingContainer.Metadata["portainer_endpoint_id"] = endpoint.Id;
+                existingContainer.Metadata["portainer_endpoint_name"] = endpoint.Name;
+                
+                // Update internal IP from Docker network if available
+                if (container.NetworkSettings?.Networks != null)
+                {
+                    var network = container.NetworkSettings.Networks.Values.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(network?.IPAddress))
+                    {
+                        existingContainer.Metadata["internal_ip"] = network.IPAddress;
+                    }
+                }
+                
+                // Associate with stack if found
+                if (parentStack != null)
+                {
+                    existingContainer.ParentId = parentStack.Id;
+                    existingContainer.Metadata["stack_name"] = stackName;
+                    context.Logger.Debug($"Associated container {containerName} with stack {parentStack.Name}");
+                }
+                
+                // Don't add to containerEntities - it's already in context.AllEntities
+                continue;
+            }
+            
+            // Container not found in existing entities - create new one
+            // This can happen if Portainer manages containers not visible to Unraid scanner
+            context.Logger.Debug($"Container {containerName} not found in existing entities, creating new container entity");
+            
             // Extract container IP and ports
             var containerIp = host.Ip; // Default to host IP
             var openPorts = new List<int>();
@@ -224,10 +227,10 @@ public class PortainerScanner : IHostScanner
                     ["portainer_endpoint_name"] = endpoint.Name
                 }
             };
-
+            
             if (parentStack != null)
             {
-                context.Logger.Debug($"Associated container {containerName} with stack {parentStack.Name}");
+                containerEntity.Metadata["stack_name"] = stackName;
             }
 
             containerEntities.Add(containerEntity);

@@ -8,7 +8,7 @@ namespace HomelabMapper.Detectors;
 public class UnraidScanner : IHostScanner
 {
     public string ScannerName => "Unraid";
-    public int Priority => 35; // After Portainer (30) so containers exist first
+    public int Priority => 25; // After Portainer (30) so containers exist first
     public List<string> DependsOn => new();
     public List<string> OptionalDependsOn => new();
 
@@ -45,6 +45,8 @@ public class UnraidScanner : IHostScanner
             // If host is PortainerService or another identified type, create a NEW Unraid entity
             // Otherwise just mark the existing host as Unraid
             Entity unraidEntity;
+            bool shouldCreateContainers = false;
+            
             if (host.Type != EntityType.Unknown && host.Type != EntityType.Unraid)
             {
                 // Create new Unraid entity
@@ -53,7 +55,7 @@ public class UnraidScanner : IHostScanner
                     Id = $"unraid-{host.Ip}",
                     Ip = host.Ip,
                     Type = EntityType.Unraid,
-                    Name = host.Name ?? "Unraid Server",
+                    Name = $"Unraid Server ({host.Ip})",
                     Status = ReachabilityStatus.Reachable,
                     OpenPorts = host.OpenPorts,
                     ParentId = string.Empty, // Empty string = root entity (prevents orchestrator from setting parent)
@@ -66,26 +68,37 @@ public class UnraidScanner : IHostScanner
                 
                 // Make the original host (e.g., Portainer) a child of Unraid
                 host.ParentId = unraidEntity.Id;
+                shouldCreateContainers = true; // Only create containers on initial detection
                 
                 context.Logger.Debug($"Created new Unraid entity and reparented {host.Type} to it");
             }
-            else
+            else if (host.Type == EntityType.Unknown)
             {
                 // Just mark the existing entity as Unraid
                 host.Type = EntityType.Unraid;
                 host.Metadata["unraid_detected"] = "true";
                 host.Metadata["unraid_container_count"] = containers.Count.ToString();
                 unraidEntity = host;
+                shouldCreateContainers = true; // Create containers when first identifying as Unraid
+            }
+            else
+            {
+                // Host is already Unraid type - this is a rescan, skip container creation
+                context.Logger.Debug($"Unraid entity already exists, skipping container creation (containers already created)");
+                unraidEntity = host;
+                shouldCreateContainers = false;
             }
 
-            // Find existing containers discovered by Portainer
-            var existingContainers = context.AllEntities
-                .Where(e => e.Type == EntityType.Container)
-                .ToList();
+            // Create container entities from Unraid data ONLY on initial detection
+            var containerEntities = new List<Entity>();
             
-            context.Logger.Debug($"Found {existingContainers.Count} existing containers to match against");
-            var containersWithId = existingContainers.Count(c => c.Metadata.ContainsKey("container_id"));
-            context.Logger.Debug($"{containersWithId} of them have container_id metadata");
+            if (!shouldCreateContainers)
+            {
+                context.Logger.Info($"Unraid rescan - containers already exist, returning Unraid entity only");
+                return ScanResult.Successful(new List<Entity>());
+            }
+            
+            context.Logger.Debug($"Creating {containers.Count} container entities from Unraid data");
 
             foreach (var container in containers)
             {
@@ -99,69 +112,50 @@ public class UnraidScanner : IHostScanner
                 
                 context.Logger.Debug($"Unraid container {containerName}: ID={unraidContainerId.Substring(0, Math.Min(12, unraidContainerId.Length))}...");
                 
-                // Try to match with existing container by Docker ID (stored by Portainer)
-                // Match against both full ID and short ID (first 12 chars)
-                var existingContainer = existingContainers.FirstOrDefault(ec =>
+                // Extract public ports
+                var openPorts = new List<int>();
+                if (container.Ports?.Any() == true)
                 {
-                    if (!ec.Metadata.ContainsKey("container_id")) return false;
-                    
-                    var portainerContainerId = ec.Metadata["container_id"] as string ?? "";
-                    
-                    // Try exact match first
-                    if (portainerContainerId == unraidContainerId) return true;
-                    
-                    // Try matching with short ID (first 12 chars)
-                    if (portainerContainerId.Length >= 12 && unraidContainerId.StartsWith(portainerContainerId.Substring(0, 12)))
-                        return true;
-                    if (unraidContainerId.Length >= 12 && portainerContainerId.StartsWith(unraidContainerId.Substring(0, 12)))
-                        return true;
-                    
-                    return false;
-                });
+                    openPorts = container.Ports
+                        .Where(p => p.PublicPort.HasValue && p.PublicPort.Value > 0)
+                        .Select(p => p.PublicPort!.Value)
+                        .Distinct()
+                        .ToList();
+                }
                 
-                if (existingContainer != null)
+                // Create container entity
+                var containerEntity = new Entity
                 {
-                    var portainerId = existingContainer.Metadata["container_id"] as string ?? "";
-                    context.Logger.Debug($"Found match! Portainer ID: {portainerId.Substring(0, Math.Min(12, portainerId.Length))}...");
-                    
-                    // Enrich existing container with Unraid metadata and update IP to Unraid IP
-                    existingContainer.Ip = unraidEntity.Ip;
-                    existingContainer.Metadata["unraid_managed"] = true;
-                    existingContainer.Metadata["unraid_image"] = container.Image ?? string.Empty;
-                    existingContainer.Metadata["unraid_state"] = container.State ?? string.Empty;
-                    existingContainer.Status = MapContainerStatus(container.State);
-                    
-                    // Update open ports from Unraid data
-                    if (container.Ports?.Any() == true)
+                    Id = $"unraid-container-{unraidContainerId}",
+                    Ip = unraidEntity.Ip,
+                    Type = EntityType.Container,
+                    Name = containerName,
+                    ParentId = unraidEntity.Id,
+                    Status = MapContainerStatus(container.State),
+                    OpenPorts = openPorts,
+                    Metadata = new Dictionary<string, object>
                     {
-                        var publicPorts = container.Ports
-                            .Where(p => p.PublicPort.HasValue && p.PublicPort.Value > 0)
-                            .Select(p => p.PublicPort!.Value)
-                            .Distinct()
-                            .ToList();
-                        
-                        if (publicPorts.Any())
-                        {
-                            existingContainer.OpenPorts = publicPorts;
-                        }
+                        ["container_id"] = unraidContainerId,
+                        ["unraid_managed"] = true,
+                        ["container_image"] = container.Image ?? string.Empty,
+                        ["container_state"] = container.State ?? string.Empty,
+                        ["unraid_source"] = true
                     }
-                    
-                    context.Logger.Debug($"Matched and enriched container {containerName} with Unraid data (IP: {unraidEntity.Ip})");
-                }
-                else
-                {
-                    context.Logger.Debug($"Found Unraid container without existing match: {containerName}");
-                }
+                };
+                
+                containerEntities.Add(containerEntity);
+                context.Logger.Debug($"Created container entity: {containerName}");
             }
 
-            // Return new Unraid entity if we created one, otherwise return empty list
-            // The ReparentContainersToUnraid correlation will handle the parent-child relationship
+            // Return Unraid entity and all created container entities
+            context.Logger.Info($"Unraid scan created {containerEntities.Count} container entities");
             if (host.Type != EntityType.Unraid)
             {
-                // We created a new Unraid entity, add it to the context
-                return ScanResult.Successful(new List<Entity> { unraidEntity });
+                // We created a new Unraid entity, return it along with all containers
+                return ScanResult.Successful(new List<Entity> { unraidEntity }.Concat(containerEntities).ToList());
             }
-            return ScanResult.Successful(new List<Entity>());
+            // Host was already Unraid type, just return the containers
+            return ScanResult.Successful(containerEntities);
         }
         catch (Exception ex)
         {
