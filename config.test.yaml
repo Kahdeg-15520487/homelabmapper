@@ -49,3 +49,6 @@ output:
   markdown: "report.md"
   mermaid: "topology.mmd"
   diff_report: "changes.md"
+
+logging:
+  level: "Info"  # Options: Debug, Info, Warn, Error
