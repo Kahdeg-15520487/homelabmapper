@@ -58,6 +58,26 @@ public class CorrelationEngine
             // Try to find a matching host by IP
             if (!string.IsNullOrEmpty(vm.Ip))
             {
+                // First, remove Unknown entities that match this VM/LXC IP
+                var unknownEntities = allEntities.Where(e =>
+                    e.Type == EntityType.Unknown &&
+                    e.Ip == vm.Ip &&
+                    e.Id != vm.Id
+                ).ToList();
+
+                foreach (var unknown in unknownEntities)
+                {
+                    // Copy open ports from Unknown entity to VM/LXC if VM doesn't have them
+                    if (unknown.OpenPorts?.Any() == true && (vm.OpenPorts == null || !vm.OpenPorts.Any()))
+                    {
+                        vm.OpenPorts = unknown.OpenPorts;
+                    }
+
+                    // Remove the duplicate Unknown entity
+                    allEntities.Remove(unknown);
+                }
+
+                // Then, check for services running on this VM
                 var matchingHost = allEntities.FirstOrDefault(e =>
                     e.Id != vm.Id &&
                     e.Ip == vm.Ip &&
