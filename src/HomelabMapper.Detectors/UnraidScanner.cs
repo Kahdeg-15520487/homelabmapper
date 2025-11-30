@@ -34,13 +34,20 @@ public class UnraidScanner : IHostScanner
                 return ScanResult.Failed(host, "Unraid API key not found", "Set UNRAID_API_KEY environment variable or configure unraid.api_key_env");
             }
 
+            // Get server info (name and IP)
+            var serverInfo = await GetServerInfoAsync(host.Ip, apiKey, context);
+            if (serverInfo == null)
+            {
+                return ScanResult.Failed(host, "Failed to query Unraid server info", "Check API key and network connectivity");
+            }
+
             var containers = await GetDockerContainersAsync(host.Ip, apiKey, context);
             if (containers == null)
             {
                 return ScanResult.Failed(host, "Failed to query Unraid GraphQL API", "Check API key and network connectivity");
             }
 
-            context.Logger.Info($"Detected Unraid server at {host.Ip} with {containers.Count} containers");
+            context.Logger.Info($"Detected Unraid server '{serverInfo.Name}' at {serverInfo.LanIp} with {containers.Count} containers");
 
             // If host is PortainerService or another identified type, create a NEW Unraid entity
             // Otherwise just mark the existing host as Unraid
@@ -52,17 +59,19 @@ public class UnraidScanner : IHostScanner
                 // Create new Unraid entity
                 unraidEntity = new Entity
                 {
-                    Id = $"unraid-{host.Ip}",
-                    Ip = host.Ip,
+                    Id = $"unraid-{serverInfo.LanIp}",
+                    Ip = serverInfo.LanIp,
                     Type = EntityType.Unraid,
-                    Name = $"Unraid Server ({host.Ip})",
+                    Name = serverInfo.Name,
                     Status = ReachabilityStatus.Reachable,
                     OpenPorts = host.OpenPorts,
                     ParentId = string.Empty, // Empty string = root entity (prevents orchestrator from setting parent)
                     Metadata = new Dictionary<string, object>
                     {
                         ["unraid_detected"] = "true",
-                        ["unraid_container_count"] = containers.Count.ToString()
+                        ["unraid_container_count"] = containers.Count.ToString(),
+                        ["unraid_server_name"] = serverInfo.Name,
+                        ["unraid_lan_ip"] = serverInfo.LanIp
                     }
                 };
                 
@@ -182,6 +191,71 @@ public class UnraidScanner : IHostScanner
         return null;
     }
 
+    private async Task<UnraidServerInfo?> GetServerInfoAsync(string hostIp, string apiKey, ScannerContext context)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Add("x-api-key", apiKey);
+            client.Timeout = TimeSpan.FromSeconds(10);
+
+            var graphqlQuery = new
+            {
+                query = @"
+                query getServerInfo {
+                    server {
+                        name
+                        lanip
+                    }
+                }"
+            };
+
+            var json = JsonSerializer.Serialize(graphqlQuery);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var url = $"http://{hostIp}/graphql";
+            
+            try
+            {
+                context.Logger.Debug($"Querying Unraid server info at {url}");
+                var response = await client.PostAsync(url, content);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    context.Logger.Debug($"Unraid server info response: {responseJson}");
+                    
+                    var graphqlResponse = JsonSerializer.Deserialize<UnraidServerInfoResponse>(responseJson);
+                    
+                    if (graphqlResponse?.Data?.Server != null)
+                    {
+                        context.Logger.Debug($"Successfully retrieved server info: {graphqlResponse.Data.Server.Name} ({graphqlResponse.Data.Server.LanIp})");
+                        return graphqlResponse.Data.Server;
+                    }
+                    else
+                    {
+                        context.Logger.Debug($"Failed to parse server info from response");
+                    }
+                }
+                else
+                {
+                    context.Logger.Debug($"Unraid API returned {response.StatusCode}: {response.ReasonPhrase}");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                context.Logger.Debug($"HTTP error for {url}: {ex.Message}");
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            context.Logger.Debug($"Error querying Unraid server info: {ex.Message}");
+            return null;
+        }
+    }
+
     private async Task<List<UnraidContainer>?> GetDockerContainersAsync(string hostIp, string apiKey, ScannerContext context)
     {
         try
@@ -283,6 +357,27 @@ public class UnraidScanner : IHostScanner
 }
 
 // GraphQL response models
+public class UnraidServerInfoResponse
+{
+    [System.Text.Json.Serialization.JsonPropertyName("data")]
+    public UnraidServerData? Data { get; set; }
+}
+
+public class UnraidServerData
+{
+    [System.Text.Json.Serialization.JsonPropertyName("server")]
+    public UnraidServerInfo? Server { get; set; }
+}
+
+public class UnraidServerInfo
+{
+    [System.Text.Json.Serialization.JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+    
+    [System.Text.Json.Serialization.JsonPropertyName("lanip")]
+    public string LanIp { get; set; } = string.Empty;
+}
+
 public class UnraidGraphQLResponse
 {
     [System.Text.Json.Serialization.JsonPropertyName("data")]
