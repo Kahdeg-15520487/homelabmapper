@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  homelabmapper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: homelabmapper
+    restart: unless-stopped
+    
+    # Network mode: host allows scanning local network
+    network_mode: host
+    
+    volumes:
+      # Configuration file (use config.docker.yaml or your own config.yaml)
+      - ./config.docker.yaml:/app/config.yaml:ro
+      
+      # Output directory for reports
+      - ./output:/app/output
+      
+      # Scan history
+      - ./.homelabmapper:/app/.homelabmapper
+    
+    environment:
+      # Proxmox credentials
+      - PROXMOX_TOKEN=${PROXMOX_TOKEN}
+      
+      # Portainer credentials
+      - PORTAINER_TOKEN=${PORTAINER_TOKEN}
+      
+      # Docker credentials (if needed)
+      - DOCKER_TOKEN=${DOCKER_TOKEN}
+      
+      # Unraid credentials (if needed)
+      - UNRAID_API_KEY=${UNRAID_API_KEY}
+      
+      # Router credentials
+      - ROUTER_PASSWORD=${ROUTER_PASSWORD}
+      
+      # SSH credentials (if needed)
+      - SSH_PASSWORD=${SSH_PASSWORD}
+      
+      # Timezone
+      - TZ=UTC
+    
+    # Run scan on a schedule
+    # Uncomment and modify as needed
+    # command: sh -c "while true; do dotnet HomelabMapper.CLI.dll config.yaml && sleep 3600; done"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/output/report.md || exit 1"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 1m
+
+  # Optional: Serve reports via nginx
+  homelabmapper-web:
+    image: nginx:alpine
+    container_name: homelabmapper-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./output:/usr/share/nginx/html:ro
+    depends_on:
+      - homelabmapper
+    profiles:
+      - web

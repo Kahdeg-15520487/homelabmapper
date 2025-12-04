@@ -45,3 +45,7 @@ changes*.md
 # Configuration with secrets
 config.yaml
 appsettings.Development.json
+
+# Docker
+.env
+output/

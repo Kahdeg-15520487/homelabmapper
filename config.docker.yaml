@@ -1,0 +1,59 @@
+scan:
+  subnets:
+    - 192.168.1.0/24
+  timeout_ms:
+    ping: 500
+    http: 3000
+  parallel_scans: 50
+  ssl:
+    accept_self_signed: true
+    log_certificate_details: true
+
+hints:
+  services:
+    - ip: "192.168.1.30"
+      port: 9000
+      name: "Portainer"
+      type: "PortainerService"
+    - ip: "192.168.1.32"
+      port: 9010
+      name: "Portainer"
+      type: "PortainerService"
+    - ip: "192.168.1.50"
+      port: 8006
+      name: "Proxmox Cluster"
+      type: "Proxmox"
+    - ip: "192.168.1.200"
+      name: "PC"
+      type: "PC"
+
+credentials:
+  proxmox:
+    token_env: "PROXMOX_TOKEN"
+  portainer:
+    token_env: "PORTAINER_TOKEN"
+  docker:
+    token_env: "DOCKER_TOKEN"
+  unraid:
+    api_key_env: "UNRAID_API_KEY"
+  router:
+    username: "admin"
+    password_env: "ROUTER_PASSWORD"
+  ssh:
+    enabled: false
+    username: "root"
+    password_env: "SSH_PASSWORD"
+
+diff:
+  enabled: true
+  history_dir: "/app/.homelabmapper/scans"
+  keep_last: 10
+
+output:
+  json: "/app/output/scan-results.json"
+  markdown: "/app/output/report.md"
+  mermaid: "/app/output/topology.mmd"
+  diff_report: "/app/output/changes.md"
+
+logging:
+  level: "Info"

@@ -1,6 +1,26 @@
 # Homelab Network Mapper
 
-A modular, extensible network discovery and mapping service for homelab environments. Automatically detects and maps Proxmox nodes, VMs, Docker hosts, Portainer stacks, containers, and NAS devices, building a complete topology of your infrastructure.
+A modular, extensible network discovery and mapping service for homelab environments. Automatically detects and maps Proxmox nodes, VMs, Docker hosts, Portainer stacks, containers, NAS devices, and network equipment, building a complete topology of your infrastructure.
+
+## Quick Start with Docker
+
+```bash
+# Clone and setup
+git clone https://github.com/Kahdeg-15520487/homelabmapper.git
+cd homelabmapper
+
+# Configure
+cp .env.example .env
+cp config.docker.yaml config.yaml
+# Edit .env and config.yaml with your settings
+
+# Run scan
+docker-compose run --rm homelabmapper
+
+# View results in ./output/
+```
+
+See [DOCKER.md](DOCKER.md) for detailed Docker setup instructions.
 
 ## Features
 

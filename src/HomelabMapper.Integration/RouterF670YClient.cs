@@ -28,12 +28,17 @@ public class RouterF670YClient : IDisposable
     /// </summary>
     public async Task InitializeAsync()
     {
+        // Determine Chrome path: environment variable, default Windows path, or default Linux path
+        var chromePath = Environment.GetEnvironmentVariable("CHROME_PATH") 
+            ?? (OperatingSystem.IsWindows() 
+                ? @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" 
+                : "/usr/bin/google-chrome-stable");
+        
         // Launch browser using installed Chrome
         _browser = await Puppeteer.LaunchAsync(new LaunchOptions
         {
             Headless = true,
-            
-            ExecutablePath = @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            ExecutablePath = chromePath,
             Args = new[] { "--no-sandbox", "--disable-setuid-sandbox", "--ignore-certificate-errors" }
         });
 

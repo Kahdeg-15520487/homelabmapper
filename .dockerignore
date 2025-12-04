@@ -1,0 +1,5 @@
+# Docker-specific files
+.env
+
+# Build artifacts
+output/
