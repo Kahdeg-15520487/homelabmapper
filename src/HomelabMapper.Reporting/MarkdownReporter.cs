@@ -80,6 +80,51 @@ public class MarkdownReporter
             AppendEntityTree(sb, root, report.Entities, 0);
         }
 
+        // IP Address List
+        sb.AppendLine();
+        sb.AppendLine("## IP Address List");
+        sb.AppendLine();
+        
+        var entitiesWithIp = report.Entities
+            .Where(e => !string.IsNullOrEmpty(e.Ip))
+            .Where(e => IsIpInSubnets(e.Ip, report.Subnets)) // Filter by configured subnets
+            .GroupBy(e => e.Ip)
+            .Select(g => g.First()) // Deduplicate by IP
+            .OrderBy(e => 
+            {
+                var parts = e.Ip.Split('.');
+                if (parts.Length == 4 && 
+                    byte.TryParse(parts[0], out var b1) &&
+                    byte.TryParse(parts[1], out var b2) &&
+                    byte.TryParse(parts[2], out var b3) &&
+                    byte.TryParse(parts[3], out var b4))
+                {
+                    return new byte[] { b1, b2, b3, b4 };
+                }
+                return new byte[] { 255, 255, 255, 255 };
+            }, Comparer<byte[]>.Create((a, b) =>
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    var cmp = a[i].CompareTo(b[i]);
+                    if (cmp != 0) return cmp;
+                }
+                return 0;
+            }))
+            .ToList();
+        
+        foreach (var entity in entitiesWithIp)
+        {
+            var icon = GetEntityIcon(entity.Type);
+            var name = string.IsNullOrEmpty(entity.Name) ? entity.Type.ToString() : entity.Name;
+            var statusIcon = GetStatusIcon(entity.Status);
+            var macAddress = entity.Metadata.ContainsKey("mac_address") 
+                ? $" - MAC: `{entity.Metadata["mac_address"]}`" 
+                : "";
+            
+            sb.AppendLine($"- **{entity.Ip}** - {icon} {name} {statusIcon}{macAddress}");
+        }
+
         // Conflicts
         if (report.Conflicts.Any())
         {
@@ -211,5 +256,55 @@ public class MarkdownReporter
             ReachabilityStatus.Stale => "⏰",
             _ => ""
         };
+    }
+
+    private static bool IsIpInSubnets(string ip, List<string> subnets)
+    {
+        if (string.IsNullOrEmpty(ip)) return false;
+        
+        var ipParts = ip.Split('.');
+        if (ipParts.Length != 4) return false;
+        
+        if (!byte.TryParse(ipParts[0], out var ip1) ||
+            !byte.TryParse(ipParts[1], out var ip2) ||
+            !byte.TryParse(ipParts[2], out var ip3) ||
+            !byte.TryParse(ipParts[3], out var ip4))
+        {
+            return false;
+        }
+        
+        uint ipAddress = ((uint)ip1 << 24) | ((uint)ip2 << 16) | ((uint)ip3 << 8) | ip4;
+        
+        foreach (var subnet in subnets)
+        {
+            var parts = subnet.Split('/');
+            if (parts.Length != 2) continue;
+            
+            var subnetIpParts = parts[0].Split('.');
+            if (subnetIpParts.Length != 4) continue;
+            
+            if (!byte.TryParse(subnetIpParts[0], out var sub1) ||
+                !byte.TryParse(subnetIpParts[1], out var sub2) ||
+                !byte.TryParse(subnetIpParts[2], out var sub3) ||
+                !byte.TryParse(subnetIpParts[3], out var sub4))
+            {
+                continue;
+            }
+            
+            if (!int.TryParse(parts[1], out var cidr) || cidr < 0 || cidr > 32)
+            {
+                continue;
+            }
+            
+            uint subnetAddress = ((uint)sub1 << 24) | ((uint)sub2 << 16) | ((uint)sub3 << 8) | sub4;
+            uint mask = cidr == 0 ? 0 : 0xFFFFFFFF << (32 - cidr);
+            
+            if ((ipAddress & mask) == (subnetAddress & mask))
+            {
+                return true;
+            }
+        }
+        
+        return false;
     }
 }
