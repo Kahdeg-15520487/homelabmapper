@@ -15,5 +15,7 @@ public enum EntityType
     PortainerStack,
     Nas,
     Unraid,
-    Service
+    Service,
+    Router,
+    AccessPoint
 }

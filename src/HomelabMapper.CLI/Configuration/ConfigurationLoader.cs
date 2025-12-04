@@ -53,6 +53,7 @@ public class CredentialsSettings
     public ServiceCredentials Portainer { get; set; } = new();
     public ServiceCredentials Docker { get; set; } = new();
     public ServiceCredentials Unraid { get; set; } = new();
+    public ServiceCredentials Router { get; set; } = new();
     public SshSettings? Ssh { get; set; }
 }
 
@@ -62,6 +63,9 @@ public class ServiceCredentials
     public string? Token { get; set; }
     public string? ApiKeyEnv { get; set; }
     public string? ApiKey { get; set; }
+    public string? Username { get; set; }
+    public string? PasswordEnv { get; set; }
+    public string? Password { get; set; }
 }
 
 public class SshSettings
@@ -120,6 +124,7 @@ public class ConfigurationLoader
         ResolveServiceCredentials(config.Credentials.Portainer);
         ResolveServiceCredentials(config.Credentials.Docker);
         ResolveServiceCredentials(config.Credentials.Unraid);
+        ResolveServiceCredentials(config.Credentials.Router);
         ResolveSshSettings(config.Credentials.Ssh);
     }
 
@@ -135,6 +140,11 @@ public class ConfigurationLoader
         if (!string.IsNullOrEmpty(creds.ApiKeyEnv))
         {
             creds.ApiKey = Environment.GetEnvironmentVariable(creds.ApiKeyEnv);
+        }
+
+        if (!string.IsNullOrEmpty(creds.PasswordEnv))
+        {
+            creds.Password = Environment.GetEnvironmentVariable(creds.PasswordEnv);
         }
     }
 

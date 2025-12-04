@@ -194,6 +194,8 @@ public class MarkdownReporter
             EntityType.Unraid => "🧱",
             EntityType.Nas => "💾",
             EntityType.Service => "⚙️",
+            EntityType.Router => "🌐",
+            EntityType.AccessPoint => "📡",
             _ => "❓"
         };
     }

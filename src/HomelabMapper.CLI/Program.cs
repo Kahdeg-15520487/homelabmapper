@@ -46,6 +46,7 @@ var registry = new ScannerRegistry(logger);
 registry.Register(new ProxmoxHostScanner());
 registry.Register(new DockerHostScanner());
 registry.Register(new PortainerScanner());
+registry.Register(new RouterF670YScanner());
 registry.Register(new UnraidScanner());
 
 var orchestrator = new ScanOrchestrator(registry, logger);
@@ -316,6 +317,17 @@ static void LoadCredentials(InMemoryCredentialStore store, CredentialsSettings c
     if (creds.Unraid != null && !string.IsNullOrEmpty(creds.Unraid.ApiKey))
     {
         store.SetCredential("unraid", "api_key", creds.Unraid.ApiKey);
+    }
+    if (creds.Router != null)
+    {
+        if (!string.IsNullOrEmpty(creds.Router.Username))
+        {
+            store.SetCredential("router", "username", creds.Router.Username);
+        }
+        if (!string.IsNullOrEmpty(creds.Router.Password))
+        {
+            store.SetCredential("router", "password", creds.Router.Password);
+        }
     }
     if (creds.Ssh != null && creds.Ssh.Enabled && !string.IsNullOrEmpty(creds.Ssh.Username))
     {
