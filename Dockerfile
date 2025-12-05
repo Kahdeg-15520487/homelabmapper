@@ -21,7 +21,7 @@ COPY src/ ./src/
 RUN dotnet publish src/HomelabMapper.CLI/HomelabMapper.CLI.csproj -c Release -o /app/publish --no-restore
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/runtime:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 
 # Install Chrome for PuppeteerSharp
