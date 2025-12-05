@@ -10,9 +10,6 @@ services:
     network_mode: host
     
     volumes:
-      # Configuration file (use config.docker.yaml or your own config.yaml)
-      - ./config.docker.yaml:/app/config.yaml:ro
-      
       # Output directory for reports
       - ./output:/app/output
       
