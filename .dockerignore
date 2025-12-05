@@ -3,3 +3,16 @@
 
 # Build artifacts
 output/
+**/bin/
+**/obj/
+**/.vs/
+
+# Reports and history
+.homelabmapper/
+*.json
+*.md
+*.mmd
+
+# User-specific files
+*.user
+config.yaml
