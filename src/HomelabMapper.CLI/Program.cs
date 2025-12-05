@@ -73,6 +73,8 @@ public partial class Program
             });
         });
 
+        app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
+
         app.MapGet("/api/scan/current", (ScanService scanService) =>
         {
             var job = scanService.GetCurrentJob();

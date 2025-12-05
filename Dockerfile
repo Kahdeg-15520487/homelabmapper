@@ -62,5 +62,8 @@ VOLUME ["/app/output", "/app/.homelabmapper"]
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
     CHROME_PATH=/usr/bin/google-chrome-stable
 
+# Expose port for web UI (when running with --server flag)
+EXPOSE 5000
+
 ENTRYPOINT ["dotnet", "HomelabMapper.CLI.dll"]
 CMD ["config.yaml"]
