@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   homelabmapper:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/kahdeg-15520487/homelabmapper:latest
     container_name: homelabmapper
     restart: unless-stopped
     
